@@ -1,0 +1,52 @@
+{
+  "name": "prestine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PRESTINE — premium clothing brand e-commerce storefront",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm run check:schema && npm run test && npm run build && npm run check:bundle",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "check:schema": "node scripts/check-schema-coverage.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "check:admin": "node scripts/check-admin-isolation.mjs",
+    "audit:nav": "node scripts/audit-nav.mjs",
+    "check:banners": "node scripts/check-banners.mjs",
+    "check:intro": "node scripts/check-intro.mjs",
+    "check:uploads": "node scripts/check-uploads.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx scripts/seed-database.ts",
+    "build:logo": "node scripts/build-logo-component.mjs",
+    "measure": "node scripts/measure.mjs"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
+    "drizzle-orm": "0.45.2",
+    "next": "16.3.0",
+    "postgres": "3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.1.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.0",
+    "postcss": "8.5.25",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

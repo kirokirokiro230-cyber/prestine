@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "name": "Check the database on model changes",
+  "description": "When a domain type, Drizzle schema or mapper is saved, run the schema coverage check so a new field can never be added without its database column (or vice versa), and remind that a migration must be generated.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "src/lib/types.ts",
+      "src/server/db/schema.ts",
+      "src/server/db/mappers.ts"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A data-model file was just saved (src/lib/types.ts, src/server/db/schema.ts or src/server/db/mappers.ts).\n\nRun `node scripts/check-schema-coverage.mjs` and report the result.\n\nIf it fails, fix the drift: every field on a persisted interface needs a matching Drizzle column and every column needs a matching field. Then check these are all in step, because a new field must be threaded through each one:\n1. src/lib/types.ts — the interface\n2. src/server/db/schema.ts — the column, with a default so existing rows survive\n3. src/server/db/mappers.ts — BOTH toX and fromX\n4. src/server/store.ts — defaultSettings()/seed defaults for the JSON store\n5. the admin form + its server action, if a merchant should be able to edit it\n6. src/server/__tests__/mappers.test.ts — the round-trip fixtures assert with toEqual and will fail otherwise\n\nThen check whether a migration is needed: compare src/server/db/schema.ts against the latest file in drizzle/. If the column is not in a migration yet, run `npm run db:generate` and read the generated SQL before saying it is done. If the change adds a column that existing rows need a value for, add a guarded backfill UPDATE to the migration — the seed uses onConflictDoNothing and will not top up an existing row.\n\nBe concise: state whether the schema is in step, whether a migration is pending, and nothing else."
+  }
+}

@@ -1,0 +1,98 @@
+# Keeps the Supabase project from being paused for inactivity.
+#
+# Supabase pauses free-tier projects after roughly one week with no API calls or
+# database connections. Dashboard visits do not count. For a shop that has not found
+# its customers yet, that means the site goes down on its own — and a paused project
+# takes manual restoration from the dashboard, so nobody finds out until someone tries
+# to buy something.
+#
+# This runs a real query against the live site every three days. Three days, not six:
+# one skipped run should not be enough to reach the deadline. GitHub also disables
+# scheduled workflows on repositories with no activity for 60 days, so this is a
+# safety net rather than a guarantee — see the note at the bottom.
+#
+# Once the shop has steady traffic this workflow is redundant. It costs nothing to
+# leave in place, and removing it is the kind of decision that gets forgotten until it
+# matters, so it stays.
+
+name: Keep database awake
+
+on:
+  schedule:
+    # 04:17 UTC, every third day. An odd minute on purpose: the top of the hour is
+    # when GitHub's scheduler is busiest and runs are most likely to be delayed.
+    - cron: "17 4 */3 * *"
+  # So it can be proved to work without waiting three days.
+  workflow_dispatch:
+
+# Nothing here needs write access to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-database-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Reach a page that queries the database
+        env:
+          # Set this to the deployed origin, e.g. https://kabuda.com
+          #
+          # A repository *variable*, not a secret: it is the public address of a public
+          # website. Storing it as a secret would only hide it from the run log, where
+          # it is genuinely useful when a ping fails.
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SITE_URL:-}" ]; then
+            echo "::error::SITE_URL repository variable is not set."
+            echo "Settings → Secrets and variables → Actions → Variables → New variable."
+            exit 1
+          fi
+
+          # /shop is deliberate. The home page can be served from cache without ever
+          # touching Postgres, which would keep this workflow green while the database
+          # quietly went idle and got paused anyway. The shop listing reads the
+          # catalogue on every request, so a 200 here proves the database answered.
+          TARGET="${SITE_URL%/}/shop"
+          echo "Pinging $TARGET"
+
+          # --fail turns a 5xx into a non-zero exit. Retries cover a cold start on the
+          # host, which is a slow response rather than a broken one.
+          STATUS=$(curl \
+            --silent \
+            --show-error \
+            --location \
+            --retry 3 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            --max-time 45 \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            "$TARGET")
+
+          echo "HTTP $STATUS"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Expected 200 from $TARGET but got $STATUS."
+            echo "If the project is already paused, restore it from the Supabase dashboard."
+            exit 1
+          fi
+
+          echo "Database reached. Inactivity timer reset."
+
+# A caveat worth knowing rather than discovering:
+#
+# GitHub disables scheduled workflows in a repository with no commits for 60 days, and
+# emails the owner when it does. If this repository goes quiet for two months, the
+# safety net switches itself off. Re-enable it from the Actions tab, or push a commit.
+#
+# The dependable fix is a paid Supabase plan, where projects are never paused for
+# inactivity. Until then, treat a failed run here as something to act on rather than
+# noise to mute.
