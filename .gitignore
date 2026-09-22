@@ -25,3 +25,7 @@ data/uploads/
 
 # Scratch stores written by the test suite.
 .test-store/
+
+# Pre-migration database exports (scripts/_backup-database.mts). Real customer PII —
+# order emails, addresses, phone numbers. Never commit.
+backups/
