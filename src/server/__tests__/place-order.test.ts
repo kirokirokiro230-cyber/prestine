@@ -6,6 +6,18 @@ import { beforeAll, describe, it, vi } from "vitest";
 // successful write, so it is stubbed rather than the test being shaped around it.
 vi.mock("next/cache", () => ({ revalidatePath: () => undefined }));
 
+/*
+ * `cookies()` is the same story: it only exists inside a request. `placeOrder` reads the
+ * customer session to stamp the order's `customerId`, and with no request scope that read
+ * throws before any pricing runs. An empty cookie store makes `currentCustomer()` return
+ * null, which is exactly the "session lapsed between the gate and the submit" path the
+ * action guards for with `?.` — the order then falls back to email-only linkage, which is
+ * correct for these tests, whose subject is the money and the record, not who was signed in.
+ */
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => undefined }),
+}));
+
 const { placeOrder } = await import("@/app/actions/checkout");
 const { getOrder } = await import("@/server/repositories/orders");
 const { createProduct, getProduct, setProductStatus } = await import(
