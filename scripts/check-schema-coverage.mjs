@@ -216,7 +216,11 @@ compare("StoreSettings", interfaceFields("StoreSettings"), tableColumns("setting
   extraInTable: ["id"],
 });
 
-compare("AdminUser", interfaceFields("AdminUser"), tableColumns("admins"));
+compare("AdminUser", interfaceFields("AdminUser"), tableColumns("admins"), {
+  // Supabase Auth bridge: set on first post-migration sign-in, never read into the
+  // domain type. Purely the RLS/session link, so no field mirrors it.
+  extraInTable: ["authUserId"],
+});
 compare("AuditEntry", interfaceFields("AuditEntry"), tableColumns("auditLog"));
 
 compare("CustomerAccount", interfaceFields("CustomerAccount"), tableColumns("customers"));

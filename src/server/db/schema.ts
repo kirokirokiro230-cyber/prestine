@@ -11,7 +11,9 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
+import { authUsers } from "drizzle-orm/supabase";
 import type {
   Address,
   AdminRole,
@@ -499,9 +501,24 @@ export const admins = pgTable(
     /**
      * A scrypt-derived key and its per-user salt, both hex. The password itself is
      * never stored, never logged and never leaves the browser in a recoverable form.
+     *
+     * Transitional: kept only until every admin has signed in through Supabase Auth
+     * at least once (see `authUserId` below) and this can be dropped. Not read by new
+     * sign-ins once that rewrite lands — Supabase owns the credential from then on.
      */
     passwordHash: text("password_hash").notNull(),
     passwordSalt: text("password_salt").notNull(),
+
+    /**
+     * Links this row to its Supabase Auth identity, once one exists.
+     *
+     * Nullable during the migration: an admin created before this column existed has
+     * none yet, and gets one the first time they are created (or re-created) through
+     * `supabase.auth.admin.createUser`. RLS policies read `auth.uid()` against this
+     * column, not against `id` — `id` stays the stable key every other table's
+     * `actorId`/audit references already point at, so nothing downstream moves.
+     */
+    authUserId: uuid("auth_user_id").references(() => authUsers.id),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -514,6 +531,8 @@ export const admins = pgTable(
      * what makes a plain unique index sufficient.
      */
     uniqueIndex("admins_email_key").on(table.email),
+    // One Supabase Auth identity maps to at most one admin row.
+    uniqueIndex("admins_auth_user_id_key").on(table.authUserId),
   ],
 );
 
@@ -547,9 +566,27 @@ export const customers = pgTable(
      * A scrypt-derived key and its per-account salt, both hex — the same parameters
      * the admin table uses, from the same functions. The password itself is never
      * stored, never logged and never leaves the browser in a recoverable form.
+     *
+     * Transitional, same as `admins.passwordHash` — this app's own OTP flow
+     * (`verify.ts`/`otp.ts`, unchanged by the Supabase Auth migration) keeps deciding
+     * whether a code is correct; a successful check bridges into Supabase Auth via
+     * `authUserId` below rather than checking this hash. Dropped once every customer
+     * has signed in at least once post-migration.
      */
     passwordHash: text("password_hash").notNull(),
     passwordSalt: text("password_salt").notNull(),
+
+    /**
+     * Links this row to its Supabase Auth identity, once one exists.
+     *
+     * Populated on the first successful OTP verification after the bridge lands
+     * (`supabase.auth.admin.createUser({ phone, phone_confirmed: true })` or the
+     * matching lookup for a returning number) — never by Supabase's own phone
+     * provider, which stays disabled. `id` remains what `orders.customerId` and
+     * `submitted_reviews.customerId` reference, so this column is purely the RLS/
+     * session bridge and nothing downstream changes shape.
+     */
+    authUserId: uuid("auth_user_id").references(() => authUsers.id),
 
     /**
      * When the signup code was confirmed. `notNull` because the row is not written
@@ -573,6 +610,8 @@ export const customers = pgTable(
     uniqueIndex("customers_phone_key").on(table.phone),
     // Receipts and support both start from an address rather than a number.
     index("customers_email_idx").on(table.email),
+    // One Supabase Auth identity maps to at most one customer row.
+    uniqueIndex("customers_auth_user_id_key").on(table.authUserId),
   ],
 );
 

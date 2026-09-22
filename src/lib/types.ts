@@ -631,6 +631,17 @@ export interface CustomerAccount {
   /** Per-account random salt, hex encoded. */
   passwordSalt: string;
   /**
+   * The Supabase Auth identity this account is bridged to, once one exists.
+   *
+   * Populated on the first successful OTP verification after the Supabase Auth bridge
+   * landed — this app's own OTP flow still decides whether a code is correct, and a
+   * success then creates or finds the matching `auth.users` row and records its id here.
+   * Absent for accounts that predate the bridge and have not signed in since, which is
+   * why it is optional. `id` stays the stable key every order and review references, so
+   * this is purely the auth/session link.
+   */
+  authUserId?: string;
+  /**
    * When the signup code was confirmed.
    *
    * Always set, because an account is only written after the code is confirmed — there

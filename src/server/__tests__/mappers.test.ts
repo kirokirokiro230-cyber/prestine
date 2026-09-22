@@ -433,6 +433,7 @@ describe("customer account mapping", () => {
     email: "ada@example.com",
     passwordHash: "a".repeat(128),
     passwordSalt: "b".repeat(32),
+    authUserId: "11111111-1111-4111-8111-111111111111",
     phoneVerifiedAt: "2026-01-01T00:00:00.000Z",
     createdAt: "2026-01-01T00:00:00.000Z",
     lastLoginAt: "2026-01-02T00:00:00.000Z",
@@ -460,6 +461,9 @@ describe("customer account mapping", () => {
     // Absent, not empty: an account without an email must not read back as `null`.
     expect(back.email).toBeUndefined();
     expect(back.lastLoginAt).toBeUndefined();
+    // An account that predates the Supabase Auth bridge has no identity yet, and must
+    // read back absent rather than as `null`.
+    expect(back.authUserId).toBeUndefined();
   });
 
   /**

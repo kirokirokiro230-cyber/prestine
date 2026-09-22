@@ -172,3 +172,37 @@ export async function recordCustomerLogin(id: string): Promise<void> {
     .set({ lastLoginAt: new Date() })
     .where(eq(customersTable.id, id));
 }
+
+/**
+ * Link a customer to its Supabase Auth identity.
+ *
+ * Called by the OTP flow after a successful verification, once `ensureAuthUser` has
+ * returned the matching `auth.users` id. Idempotent in effect — the value written is the
+ * same on every sign-in for a given number — so calling it again on a returning customer
+ * simply rewrites the same id. Kept a single-field updater alongside `setCustomerPassword`
+ * and `recordCustomerLogin` rather than folded into `createCustomer`, because a returning
+ * customer needs it set without a row being created, and an account that predates the
+ * bridge gets it backfilled on its next verification.
+ *
+ * Not allowed to be the thing that fails a sign-in: the caller treats a thrown error as
+ * "link it next time" and proceeds. The unique index on `auth_user_id` still holds, so a
+ * genuine conflict (the same identity already on another row) surfaces rather than being
+ * silently swallowed here.
+ */
+export async function setCustomerAuthUserId(
+  id: string,
+  authUserId: string,
+): Promise<void> {
+  if (!isDatabaseConfigured()) {
+    await mutateStore((store) => {
+      const customer = store.customers.find((entry) => entry.id === id);
+      if (customer) customer.authUserId = authUserId;
+    });
+    return;
+  }
+
+  await getDb()
+    .update(customersTable)
+    .set({ authUserId })
+    .where(eq(customersTable.id, id));
+}

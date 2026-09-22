@@ -8,8 +8,10 @@ import {
   createCustomer,
   findCustomerByPhone,
   recordCustomerLogin,
+  setCustomerAuthUserId,
   setCustomerPassword,
 } from "@/server/customers";
+import { ensureAuthUser } from "@/server/supabase-auth";
 import {
   endCustomerSession,
   startCustomerSession,
@@ -56,6 +58,30 @@ async function clientKey(): Promise<string> {
 function internalNext(next: string, fallback = "/account"): string {
   // Only allow internal redirects — an open redirect here would be a phishing gift.
   return next.startsWith("/") && !next.startsWith("//") ? next : fallback;
+}
+
+/**
+ * Bridge a just-verified customer into Supabase Auth.
+ *
+ * Runs only after the OTP has been confirmed, which is the whole point of the bridge:
+ * this app's code decides the number is genuine, and a success then ensures a matching
+ * `auth.users` identity exists and records its id on the row. That id is what row-level
+ * security reads through `auth.uid()`.
+ *
+ * Deliberately swallows every failure. A customer who has proven they hold their number
+ * must get their session whether or not Supabase Auth is reachable — `authUserId` is
+ * nullable exactly so it can be filled in on a later verification. When the bridge is not
+ * configured at all (local development on the JSON store), `ensureAuthUser` returns null
+ * and this is a no-op.
+ */
+async function bridgeToSupabaseAuth(customerId: string, phone: string): Promise<void> {
+  try {
+    const authUserId = await ensureAuthUser(phone);
+    if (authUserId) await setCustomerAuthUserId(customerId, authUserId);
+  } catch (error) {
+    // Logged, never rethrown — see the note above on why this cannot block sign-in.
+    console.error("[customer-auth] Supabase Auth bridge failed:", error);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,6 +178,9 @@ export async function completeSignup(
     passwordSalt: verification.pendingPasswordSalt,
     phoneVerifiedAt: new Date().toISOString(),
   });
+
+  // A brand-new number: create its Supabase Auth identity and link it.
+  await bridgeToSupabaseAuth(customer.id, customer.phone);
 
   await startCustomerSession(customer);
   redirect(internalNext(next));
@@ -272,6 +301,13 @@ export async function completePasswordReset(
   }
 
   await setCustomerPassword(customer.id, password);
+
+  // A returning number: find (or, for an account that predates the bridge, create) its
+  // Supabase Auth identity and link it if it is not linked yet.
+  if (!customer.authUserId) {
+    await bridgeToSupabaseAuth(customer.id, customer.phone);
+  }
+
   await startCustomerSession(customer);
 
   redirect("/account");
