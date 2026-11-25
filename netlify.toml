@@ -1,0 +1,10 @@
+# Build command and publish directory are configured in the Netlify UI.
+
+[build.environment]
+  # These variables are stored as secrets but hold ordinary, non-sensitive config:
+  # environment names ("production"/"sandbox"), the public Storage bucket name that
+  # appears in every image URL, and the store's Delhivery client name. Their values
+  # naturally occur throughout the code and build output, so secrets scanning flags
+  # them and fails the build. Real credentials (keys, tokens, session secrets) are
+  # still scanned.
+  SECRETS_SCAN_OMIT_KEYS = "CASHFREE_ENVIRONMENT,DELHIVERY_ENVIRONMENT,DELHIVERY_CLIENT_NAME,SUPABASE_STORAGE_BUCKET"
