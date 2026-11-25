@@ -5,6 +5,7 @@ import {
   navCollections,
   storeSettings,
 } from "@/lib/catalog";
+import { POLICY_ORDER, policies } from "@/lib/policies";
 
 // The catalog is merchant-managed live data; do not query Supabase while compiling.
 export const dynamic = "force-dynamic";
@@ -44,25 +45,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${base}/contact`, lastModified: now, changeFrequency: "yearly", priority: 0.5 },
     { url: `${base}/faq`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
     {
-      url: `${base}/shipping-returns`,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.5,
-    },
-    {
       url: `${base}/size-guide`,
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.5,
     },
-    {
-      url: `${base}/accessibility`,
+    // Every policy page, from the same list the footer uses, so one cannot be added to the
+    // footer and forgotten here.
+    ...POLICY_ORDER.map((key) => ({
+      url: `${base}${policies[key].path}`,
       lastModified: now,
-      changeFrequency: "yearly",
+      changeFrequency: "yearly" as const,
       priority: 0.3,
-    },
-    { url: `${base}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${base}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    })),
   ];
 
   const categoryRoutes: MetadataRoute.Sitemap = categories.map((category) => ({

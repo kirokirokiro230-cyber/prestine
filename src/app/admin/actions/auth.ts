@@ -3,7 +3,9 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { recordAudit } from "@/server/audit";
+import { clientIp } from "@/server/client-ip";
 import { lockoutMessage } from "@/lib/login-throttle";
+import { safeInternalPath } from "@/lib/safe-redirect";
 import {
   createAdmin,
   findAdminByEmail,
@@ -36,12 +38,9 @@ export interface AuthFormState {
   fieldErrors?: Record<string, string>;
 }
 
-async function clientKey(): Promise<string> {
-  const list = await headers();
-  // x-forwarded-for is set by any sane proxy; fall back to a constant so the
-  // limiter still works locally.
-  return list.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-}
+// Address resolution lives in `src/server/client-ip.ts` so every limiter keys
+// on the same thing, including Netlify's unforgeable connection header.
+const clientKey = clientIp;
 
 export async function signIn(
   _previous: AuthFormState,
@@ -60,7 +59,9 @@ export async function signIn(
 
   // Both keys in parallel: two independent reads, and sign-in is the one request where
   // latency is already dominated by the deliberate cost of scrypt.
-  const lockouts = await Promise.all(keys.map(loginLockout));
+  // Explicit arrow, never `keys.map(loginLockout)`: map would pass the array index
+  // as the second argument. See the note on `loginLockout`.
+  const lockouts = await Promise.all(keys.map((key) => loginLockout(key)));
   const locked = lockouts.find((lockout) => lockout.locked);
   if (locked) return { error: lockoutMessage(locked) };
 
@@ -98,8 +99,11 @@ export async function signIn(
     summary: `Signed in from ${ip}`,
   });
 
-  // Only allow internal redirects — an open redirect here would be a phishing gift.
-  redirect(next.startsWith("/admin") ? next : "/admin");
+  // Only allow internal redirects, and only into the admin panel — an open redirect
+  // here would be a phishing gift. `safeInternalPath` rejects `/\evil.example` and its
+  // relatives, which a bare `startsWith("/admin")` happened to refuse only by accident.
+  const target = safeInternalPath(next, "/admin");
+  redirect(target === "/admin" || target.startsWith("/admin/") ? target : "/admin");
 }
 
 export async function signOut(): Promise<void> {

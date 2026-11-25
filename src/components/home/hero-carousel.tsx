@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import { ResponsiveImage } from "@/components/ui/responsive-image";
+import { useHorizontalSwipe } from "@/hooks/use-horizontal-swipe";
 import { usePrefersReducedMotion } from "@/hooks/use-store";
 import {
   FIRST_SLIDE,
@@ -62,9 +63,6 @@ const INTERVAL_MS = 3000;
  */
 const EXIT_MS = 700;
 
-/** Horizontal drag distance that counts as a swipe rather than a tap. */
-const SWIPE_THRESHOLD_PX = 50;
-
 /** Shared by the previous/next buttons, which differ only in which edge they sit on. */
 const ARROW_CLASS =
   "absolute top-1/2 z-30 hidden -translate-y-1/2 place-items-center rounded-full bg-canvas/85 p-2.5 text-content shadow-sm backdrop-blur-sm transition-[background-color,opacity] duration-300 hover:bg-canvas focus-visible:opacity-100 sm:grid lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100";
@@ -76,7 +74,6 @@ export function HeroCarousel({ banners }: { banners: Banner[] }) {
   const { current, leaving, direction } = slide;
 
   const reducedMotion = usePrefersReducedMotion();
-  const pointerStartX = useRef<number | null>(null);
 
   const count = banners.length;
   const multiple = count > 1;
@@ -101,6 +98,13 @@ export function HeroCarousel({ banners }: { banners: Banner[] }) {
     (target: number) => setSlide((state) => goToSlide(state, target, count)),
     [count],
   );
+
+  const swipeHandlers = useHorizontalSwipe({
+    enabled: multiple,
+    onSwipeLeft: advance,
+    onSwipeRight: previous,
+    onActiveChange: setInteracting,
+  });
 
   useEffect(() => {
     if (!multiple || interacting || reducedMotion) return;
@@ -127,34 +131,16 @@ export function HeroCarousel({ banners }: { banners: Banner[] }) {
 
   if (count === 0) return null;
 
-  const handlePointerDown = (event: React.PointerEvent) => {
-    // Mouse drags are not swipes — only track touch and pen.
-    if (event.pointerType === "mouse") return;
-    pointerStartX.current = event.clientX;
-  };
-
-  const handlePointerUp = (event: React.PointerEvent) => {
-    const start = pointerStartX.current;
-    pointerStartX.current = null;
-    if (start === null) return;
-
-    const delta = event.clientX - start;
-    if (Math.abs(delta) < SWIPE_THRESHOLD_PX) return;
-    if (delta < 0) advance();
-    else previous();
-  };
-
   return (
     <section
+      {...swipeHandlers}
       aria-roledescription="carousel"
       aria-label="Featured"
-      className="group relative overflow-hidden border-b border-line bg-surface-sunken"
+      className="group relative touch-pan-y select-none overflow-hidden border-b border-line bg-surface-sunken shadow-lg"
       onMouseEnter={() => setInteracting(true)}
       onMouseLeave={() => setInteracting(false)}
       onFocusCapture={() => setInteracting(true)}
       onBlurCapture={() => setInteracting(false)}
-      onPointerDown={handlePointerDown}
-      onPointerUp={handlePointerUp}
       onKeyDown={(event) => {
         if (!multiple) return;
         if (event.key === "ArrowRight") {
@@ -218,10 +204,10 @@ export function HeroCarousel({ banners }: { banners: Banner[] }) {
             <CaretRight size={16} aria-hidden />
           </button>
 
-          <div className="absolute inset-x-0 bottom-4 z-30 flex items-center justify-center">
+          <div className="absolute inset-x-0 bottom-6 z-30 flex items-center justify-center">
             {/* Lighter on desktop, but the pill stays. Dots straight onto an
                 unknown merchant photograph is a contrast gamble. */}
-            <div className="flex items-center gap-2 rounded-full bg-canvas/85 px-3 py-2 backdrop-blur-sm lg:bg-canvas/70">
+            <div className="flex items-center gap-2 rounded-full border border-white/15 bg-ink-950/35 px-3 py-2 text-white shadow-lg backdrop-blur-md">
               {banners.map((banner, position) => (
                 <button
                   key={banner.id}
@@ -236,8 +222,8 @@ export function HeroCarousel({ banners }: { banners: Banner[] }) {
                     className={cn(
                       "block h-1.5 rounded-full transition-all duration-300",
                       position === current
-                        ? "w-5 bg-content"
-                        : "w-1.5 bg-content-subtle hover:bg-content-muted",
+                        ? "w-5 bg-white"
+                        : "w-1.5 bg-white/45 hover:bg-white/75",
                     )}
                   />
                 </button>
@@ -378,7 +364,7 @@ function Slide({
             parent centres this block, so vertical padding would only fight it. */}
         <div
           className={cn(
-            "max-w-xl py-16 lg:py-0",
+            "max-w-2xl py-20 lg:py-0",
             centered && "mx-auto text-center",
             animate && "transition-[opacity,transform] duration-700 ease-out",
             // The delay only applies on the way in, so leaving is immediate. The
@@ -404,7 +390,7 @@ function Slide({
             className={cn(
               // Steps back down at `lg`: the band is short, and a 60px headline in
               // 28rem of height leaves no room for the image to read as a photograph.
-              "mt-4 text-balance font-display text-4xl leading-[1.05] sm:text-5xl lg:text-4xl",
+              "mt-5 max-w-2xl text-balance font-display text-5xl font-medium leading-[0.96] tracking-[-0.04em] sm:text-6xl lg:text-7xl",
               light ? "text-bone-50" : "text-ink-950",
             )}
           >
@@ -426,7 +412,7 @@ function Slide({
             <Link
               href={banner.ctaHref}
               className={cn(
-                "group/cta mt-9 inline-flex h-12 items-center gap-2 px-7 text-xs font-medium uppercase tracking-[0.1em] transition-colors lg:mt-6 lg:h-11 lg:px-6",
+                "group/cta mt-9 inline-flex h-12 items-center gap-3 rounded-full px-7 text-2xs font-semibold uppercase tracking-[0.14em] shadow-lg transition-[background-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-xl lg:mt-8 lg:h-12 lg:px-7",
                 light
                   ? "bg-bone-50 text-ink-950 hover:bg-bone-200"
                   : "bg-ink-950 text-bone-50 hover:bg-ink-800",

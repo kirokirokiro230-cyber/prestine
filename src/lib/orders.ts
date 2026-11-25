@@ -30,6 +30,8 @@ export const demoOrders: Order[] = [
     id: "PR-260612-K4TQ",
     placedAt: "2026-06-12T09:24:00.000Z",
     status: "delivered",
+    paymentStatus: "paid",
+    paymentMethod: "prepaid",
     email: "alex.morgan@example.com",
     cardLast4: "4242",
     lines: [
@@ -58,7 +60,7 @@ export const demoOrders: Order[] = [
         category: "shirts",
       },
     ],
-    totals: { subtotal: 63500, discount: 6350, shipping: 0, tax: 4572, total: 61722 },
+    totals: { subtotal: 63500, discount: 6350, shipping: 0, tax: 4572, codFee: 0, total: 61722 },
     promoCode: "WELCOME10",
     shippingAddress: {
       name: "Alex Morgan",
@@ -78,6 +80,8 @@ export const demoOrders: Order[] = [
     id: "PR-260504-9WZM",
     placedAt: "2026-05-04T15:41:00.000Z",
     status: "delivered",
+    paymentStatus: "paid",
+    paymentMethod: "prepaid",
     email: "alex.morgan@example.com",
     cardLast4: "4242",
     lines: [
@@ -94,7 +98,7 @@ export const demoOrders: Order[] = [
         category: "denim",
       },
     ],
-    totals: { subtotal: 22500, discount: 0, shipping: 0, tax: 1800, total: 24300 },
+    totals: { subtotal: 22500, discount: 0, shipping: 0, tax: 1800, codFee: 0, total: 24300 },
     shippingAddress: {
       name: "Alex Morgan",
       phone: "+44 20 7946 0102",

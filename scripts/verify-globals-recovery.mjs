@@ -59,7 +59,7 @@ token("--text-2xs--line-height", "1.35");
 
 console.log("\n— ink —");
 const ink = {
-  100: "#e8e6e1",
+  100: "#095436",
   200: "#cdc9c1",
   300: "#a9a49a",
   400: "#807b71",

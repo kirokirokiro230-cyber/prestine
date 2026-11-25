@@ -5,6 +5,7 @@ import { ProductGrid } from "@/components/product/product-grid";
 import { PurchasePanel } from "@/components/product/purchase-panel";
 import { RecentlyViewed } from "@/components/product/recently-viewed";
 import { ReviewsSection } from "@/components/product/reviews-section";
+import { StyleHints } from "@/components/product/style-hints";
 import { ViewTracker } from "@/components/product/view-tracker";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { SectionHeading } from "@/components/ui/section-heading";
@@ -15,9 +16,11 @@ import {
   getProductReviews,
   relatedProducts,
   storeSettings,
+  stylingFor,
   toSummary,
 } from "@/lib/catalog";
 import { createMoneyFormatter } from "@/lib/format";
+import { jsonLdScript } from "@/lib/json-ld";
 
 export async function generateMetadata({
   params,
@@ -65,11 +68,12 @@ export default async function ProductPage({
   const requestedColor = Array.isArray(query.color) ? query.color[0] : query.color;
   const color = product.colors.find((c) => c.id === requestedColor) ?? product.colors[0];
 
-  const [category, related, reviews, settings] = await Promise.all([
+  const [category, related, reviews, settings, styling] = await Promise.all([
     getCategory(product.category),
     relatedProducts(product, 4),
     getProductReviews(product),
     storeSettings(),
+    stylingFor(product),
   ]);
 
   const summary = toSummary(product);
@@ -133,13 +137,18 @@ export default async function ProductPage({
     <>
       <script
         type="application/ld+json"
-        // Serialised product data only — no user input reaches this string.
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        /*
+         * `jsonLdScript`, not `JSON.stringify`. This block carries `review.author`,
+         * `review.title` and `review.body`, every one of them written by a shopper —
+         * so a body containing `</script>` used to close this element early and run
+         * as script on the page. See `src/lib/json-ld.ts`.
+         */
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(jsonLd) }}
       />
 
       <ViewTracker slug={product.slug} />
 
-      <div className="page-gutter mx-auto max-w-page py-6 lg:py-10">
+      <div className="page-gutter mx-auto max-w-page py-10 lg:py-14">
         <Breadcrumbs
           items={[
             { label: "Home", href: "/" },
@@ -153,7 +162,7 @@ export default async function ProductPage({
         <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
           <ProductGallery product={summary} color={color} />
 
-          <div className="lg:sticky lg:top-28 lg:self-start">
+          <div className="paper-panel p-5 sm:p-7 lg:sticky lg:top-28 lg:self-start lg:p-8">
             <PurchasePanel
               product={summary}
               fitNote={product.fitNote}
@@ -167,7 +176,6 @@ export default async function ProductPage({
                 locale: settings.locale,
                 email: settings.email,
                 freeShippingThreshold: settings.freeShippingThreshold,
-                returnWindowDays: settings.returnWindowDays,
                 servicePromises: settings.servicePromises,
               }}
             />
@@ -288,6 +296,25 @@ export default async function ProductPage({
           />
         </div>
       </div>
+
+      {/*
+        Style hints: official styling photographs that include this product. Absent when
+        the merchant has not added any, and `stylingFor` answers "none" rather than
+        throwing, so a database problem here can never take the product page down.
+      */}
+      {styling.length > 0 ? (
+        <section className="border-t border-line">
+          <div className="page-gutter mx-auto max-w-page py-16 lg:py-20">
+            <SectionHeading
+              eyebrow="Official styling"
+              title="Style hints"
+              description="See it worn. Open a photograph for every piece in the look."
+              className="mb-10"
+            />
+            <StyleHints looks={styling} currentProductId={product.id} />
+          </div>
+        </section>
+      ) : null}
 
       {/* Cross-sell */}
       {related.length > 0 ? (

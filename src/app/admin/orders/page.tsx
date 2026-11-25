@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { Panel, StatCard, StatusPill } from "@/components/admin/primitives";
 import { OrderFilters } from "@/components/admin/order-filters";
 import { createMoneyFormatter, formatDate } from "@/lib/format";
@@ -56,13 +57,13 @@ export default async function AdminOrdersPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="font-display text-3xl leading-tight">Orders</h1>
-        <p data-numeric className="mt-1.5 text-sm text-content-muted">
-          {result.total} order{result.total === 1 ? "" : "s"}
-          {status !== "all" ? ` · ${status}` : ""}
-        </p>
-      </header>
+      <AdminPageHeader
+        eyebrow="Selling"
+        title="Orders"
+        description={`${result.total} order${result.total === 1 ? "" : "s"}${
+          status !== "all" ? ` · ${status}` : ""
+        }. Review fulfilment, customer details, payments and delivery progress.`}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -92,7 +93,7 @@ export default async function AdminOrdersPage({
             No orders match those filters.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="scrollbar-thin overflow-x-auto">
             <table className="w-full min-w-3xl text-sm">
               <caption className="sr-only">
                 Orders, page {result.page} of {result.totalPages}

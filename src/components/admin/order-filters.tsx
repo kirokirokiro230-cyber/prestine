@@ -29,7 +29,7 @@ export function OrderFilters() {
   );
 
   return (
-    <div className="flex flex-wrap items-end gap-3 border-b border-line px-5 py-4">
+    <div className="grid gap-3 border-b border-line bg-surface-sunken/45 px-5 py-4 md:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_repeat(4,auto)] xl:items-end">
       <div className="relative min-w-52 flex-1">
         <label htmlFor="order-search" className="sr-only">
           Search orders
@@ -47,7 +47,7 @@ export function OrderFilters() {
           onKeyDown={(event) => {
             if (event.key === "Enter") set({ q: (event.target as HTMLInputElement).value });
           }}
-          className="h-10 w-full border border-line-strong bg-canvas pl-8 pr-3 text-sm placeholder:text-content-subtle focus:border-accent focus:outline-none"
+          className="h-10 w-full border border-line-strong bg-surface pl-9 pr-3 text-sm shadow-xs placeholder:text-content-subtle transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
         />
       </div>
 
@@ -57,7 +57,7 @@ export function OrderFilters() {
           onChange={(event) =>
             set({ status: event.target.value === "all" ? null : event.target.value })
           }
-          className="h-10 cursor-pointer border border-line-strong bg-canvas px-2.5 text-sm focus:border-accent focus:outline-none"
+          className="h-10 cursor-pointer border border-line-strong bg-surface px-3 text-sm font-normal normal-case tracking-normal text-content shadow-xs transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
         >
           <option value="all">All statuses</option>
           <option value="processing">Processing</option>
@@ -72,7 +72,7 @@ export function OrderFilters() {
           type="date"
           value={searchParams.get("from") ?? ""}
           onChange={(event) => set({ from: event.target.value || null })}
-          className="h-10 border border-line-strong bg-canvas px-2.5 text-sm focus:border-accent focus:outline-none"
+          className="h-10 border border-line-strong bg-surface px-3 text-sm font-normal normal-case tracking-normal text-content shadow-xs transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
         />
       </Field>
 
@@ -81,7 +81,7 @@ export function OrderFilters() {
           type="date"
           value={searchParams.get("to") ?? ""}
           onChange={(event) => set({ to: event.target.value || null })}
-          className="h-10 border border-line-strong bg-canvas px-2.5 text-sm focus:border-accent focus:outline-none"
+          className="h-10 border border-line-strong bg-surface px-3 text-sm font-normal normal-case tracking-normal text-content shadow-xs transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
         />
       </Field>
 
@@ -89,7 +89,7 @@ export function OrderFilters() {
         <select
           value={searchParams.get("sort") ?? "date-desc"}
           onChange={(event) => set({ sort: event.target.value })}
-          className="h-10 cursor-pointer border border-line-strong bg-canvas px-2.5 text-sm focus:border-accent focus:outline-none"
+          className="h-10 cursor-pointer border border-line-strong bg-surface px-3 text-sm font-normal normal-case tracking-normal text-content shadow-xs transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
         >
           <option value="date-desc">Newest first</option>
           <option value="date-asc">Oldest first</option>
@@ -109,11 +109,9 @@ export function OrderFilters() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-2xs font-medium uppercase tracking-[0.1em] text-content-muted">
-        {label}
-      </span>
+    <label className="flex min-w-36 flex-col gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-content-muted">
+      <span>{label}</span>
       {children}
-    </div>
+    </label>
   );
 }

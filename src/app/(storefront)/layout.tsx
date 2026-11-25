@@ -53,6 +53,11 @@ export default async function StorefrontLayout({
     promoCodes,
     locale: settings.locale,
     currency: settings.currency,
+    codEnabled: settings.codEnabled,
+    codFee: settings.codFee,
+    codMinOrder: settings.codMinOrder,
+    codMaxOrder: settings.codMaxOrder,
+    firstOrderPercent: settings.firstOrderDiscountPercent,
   };
 
   const hero = arrivals[0];
@@ -79,11 +84,11 @@ export default async function StorefrontLayout({
         contact={{ email: settings.email, address: settings.address }}
       />
 
-      <main id="main" className="min-h-[60vh]">
+      <main id="main" className="storefront-main min-h-[60vh]">
         {children}
       </main>
 
-      <Footer settings={settings} columns={buildFooterNav(collections, settings)} />
+      <Footer settings={settings} columns={buildFooterNav(collections)} />
 
       {/*
         The opening logo animation. Mounted here rather than in the root layout for

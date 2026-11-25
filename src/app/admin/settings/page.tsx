@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { Panel } from "@/components/admin/primitives";
 import { SettingsForm } from "@/components/admin/settings-form";
 import { getSettings } from "@/server/repositories/settings";
@@ -13,13 +14,11 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="font-display text-3xl leading-tight">Settings</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-content-muted">
-          These values are read at request time, so a change takes effect on the next page
-          load. Prices already in a shopper&apos;s bag keep the amount they were added at.
-        </p>
-      </header>
+      <AdminPageHeader
+        eyebrow="Configuration"
+        title="Settings"
+        description="Store identity, pricing, delivery, contact details and storefront content. Changes take effect on the next page load."
+      />
 
       <SettingsForm settings={settings} />
 
@@ -41,11 +40,13 @@ export default async function SettingsPage() {
             to start without it.
           </li>
           <li>
-            <strong className="font-medium text-content">Data storage.</strong> The store is
-            a JSON file on disk, which works locally and on any host with a persistent
-            disk. It does not work on Vercel — swap{" "}
-            <code className="font-mono text-xs">src/server/store.ts</code> for a database
-            first.
+            <strong className="font-medium text-content">Data storage.</strong> Everything
+            reads from and writes to Supabase Postgres. Set{" "}
+            <code className="font-mono text-xs">SUPABASE_URL</code>,{" "}
+            <code className="font-mono text-xs">SUPABASE_ANON_KEY</code> and{" "}
+            <code className="font-mono text-xs">SUPABASE_SERVICE_ROLE_KEY</code>, then run
+            the migrations in <code className="font-mono text-xs">supabase/migrations/</code>{" "}
+            against your project before anything in the admin panel will work.
           </li>
           <li>
             <strong className="font-medium text-content">Image hosts.</strong> Product image

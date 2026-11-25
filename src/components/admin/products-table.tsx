@@ -69,7 +69,7 @@ export function ProductsTable({
   return (
     <div>
       {/* Filter bar */}
-      <div className="flex flex-wrap items-end gap-3 border-b border-line px-5 py-4">
+      <div className="grid gap-3 border-b border-line bg-surface-sunken/45 px-5 py-4 md:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_repeat(4,auto)] xl:items-end">
         <div className="relative min-w-52 flex-1">
           <label htmlFor="product-search" className="sr-only">
             Search products
@@ -89,7 +89,7 @@ export function ProductsTable({
                 setParam({ q: (event.target as HTMLInputElement).value });
               }
             }}
-            className="h-10 w-full border border-line-strong bg-canvas pl-8 pr-3 text-sm placeholder:text-content-subtle focus:border-accent focus:outline-none"
+            className="h-10 w-full border border-line-strong bg-surface pl-9 pr-3 text-sm shadow-xs placeholder:text-content-subtle transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
           />
         </div>
 
@@ -147,7 +147,7 @@ export function ProductsTable({
 
       {/* Bulk actions */}
       {selected.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface-sunken px-5 py-3">
+        <div className="sticky top-17 z-20 flex flex-wrap items-center gap-3 border-b border-accent/20 bg-accent-soft/95 px-5 py-3 shadow-sm backdrop-blur-md">
           <p data-numeric className="text-sm">
             {selected.length} selected
           </p>
@@ -189,7 +189,7 @@ export function ProductsTable({
           </Button>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="scrollbar-thin overflow-x-auto">
           <table className="w-full min-w-4xl text-sm">
             <caption className="sr-only">
               Products, page {page} of {totalPages}
@@ -256,7 +256,7 @@ export function ProductsTable({
                         <span
                           aria-hidden
                           style={{ backgroundColor: product.colors[0]?.hex }}
-                          className="size-8 shrink-0 ring-1 ring-inset ring-black/10"
+                          className="size-9 shrink-0 rounded-lg ring-1 ring-inset ring-black/10 shadow-xs"
                         />
                         <span className="min-w-0">
                           <Link
@@ -358,14 +358,13 @@ function Select({
   options: Array<{ value: string; label: string }>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-2xs font-medium uppercase tracking-[0.1em] text-content-muted">
-        {label}
-      </label>
+    <label className="flex min-w-36 flex-col gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-content-muted">
+      <span>{label}</span>
       <select
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 cursor-pointer border border-line-strong bg-canvas px-2.5 text-sm focus:border-accent focus:outline-none"
+        className="h-10 cursor-pointer border border-line-strong bg-surface px-3 text-sm font-normal normal-case tracking-normal text-content shadow-xs transition-[border-color,box-shadow] focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/10"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -373,6 +372,6 @@ function Select({
           </option>
         ))}
       </select>
-    </div>
+    </label>
   );
 }

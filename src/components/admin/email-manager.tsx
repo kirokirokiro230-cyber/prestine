@@ -455,7 +455,7 @@ function LogPanel({ log }: { log: EmailRecord[] }) {
                   {record.orderId ? ` · ${record.orderId}` : ""}
                 </p>
                 {record.error ? (
-                  <p className="mt-1 text-xs leading-relaxed text-danger-500">
+                  <p className="mt-1 text-xs leading-relaxed text-danger-500 dark:text-danger-100">
                     {record.error}
                   </p>
                 ) : null}

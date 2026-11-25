@@ -6,7 +6,8 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 import type { AdminRole, AdminUser, Permission } from "@/lib/types";
-import { mutateStore, readStore } from "./store";
+import { db, insertInto, unwrap, updateTable } from "./supabase";
+import type { AdminRow } from "./database.types";
 import { readPayload, secretFromEnv, signPayload } from "./tokens";
 
 /**
@@ -164,22 +165,58 @@ export const ROLE_DESCRIPTIONS: Record<AdminRole, string> = {
 /* Users                                                              */
 /* ------------------------------------------------------------------ */
 
+function fromRow(row: AdminRow): AdminUser {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    passwordHash: row.password_hash,
+    passwordSalt: row.password_salt,
+    createdAt: row.created_at,
+    lastLoginAt: row.last_login_at ?? undefined,
+    disabled: row.disabled,
+  };
+}
+
 export async function listAdmins(): Promise<AdminUser[]> {
-  return (await readStore()).admins;
+  const rows = unwrap(
+    await db().from("admins").select("*").overrideTypes<AdminRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }
 
 export async function findAdminByEmail(email: string): Promise<AdminUser | undefined> {
   const normalised = email.trim().toLowerCase();
-  return (await readStore()).admins.find((admin) => admin.email === normalised);
+  const row = unwrap(
+    await db()
+      .from("admins")
+      .select("*")
+      .eq("email", normalised)
+      .maybeSingle()
+      .overrideTypes<AdminRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 export async function findAdminById(id: string): Promise<AdminUser | undefined> {
-  return (await readStore()).admins.find((admin) => admin.id === id);
+  const row = unwrap(
+    await db()
+      .from("admins")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle()
+      .overrideTypes<AdminRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 /** True when no admin exists yet, which unlocks the one-time setup screen. */
 export async function needsFirstAdmin(): Promise<boolean> {
-  return (await readStore()).admins.length === 0;
+  const rows = unwrap(
+    await db().from("admins").select("id").limit(1).overrideTypes<Array<Pick<AdminRow, "id">>, { merge: false }>(),
+  );
+  return rows.length === 0;
 }
 
 export async function createAdmin(input: {
@@ -194,86 +231,117 @@ export async function createAdmin(input: {
   const { hash, salt } = await hashPassword(input.password);
   const email = input.email.trim().toLowerCase();
 
-  return mutateStore((store) => {
-    if (store.admins.some((admin) => admin.email === email)) {
-      throw new Error("An admin with that email already exists.");
-    }
+  const existing = await findAdminByEmail(email);
+  if (existing) throw new Error("An admin with that email already exists.");
 
-    const admin: AdminUser = {
+  const row = unwrap(
+    await insertInto(db(), "admins", {
       id: `adm_${randomUUID().slice(0, 8)}`,
       email,
       name: input.name.trim(),
       role: input.role,
-      passwordHash: hash,
-      passwordSalt: salt,
-      createdAt: new Date().toISOString(),
-    };
+      password_hash: hash,
+      password_salt: salt,
+    })
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as AdminRow;
 
-    store.admins.push(admin);
-    return admin;
-  });
+  return fromRow(row);
 }
 
 export async function updateAdmin(
   id: string,
   patch: { name?: string; role?: AdminRole; disabled?: boolean; password?: string },
 ): Promise<AdminUser> {
-  let credentials: { hash: string; salt: string } | null = null;
+  const admin = await findAdminById(id);
+  if (!admin) throw new Error("Admin not found");
 
+  let credentials: { hash: string; salt: string } | null = null;
   if (patch.password) {
     const strength = validatePasswordStrength(patch.password);
     if (strength) throw new Error(strength);
     credentials = await hashPassword(patch.password);
   }
 
-  return mutateStore((store) => {
-    const admin = store.admins.find((entry) => entry.id === id);
-    if (!admin) throw new Error("Admin not found");
-
-    if (patch.name !== undefined) admin.name = patch.name.trim();
-    if (patch.disabled !== undefined) admin.disabled = patch.disabled;
-
-    if (patch.role !== undefined && patch.role !== admin.role) {
-      // Never allow the last owner to be demoted, or nobody can reach settings.
-      const owners = store.admins.filter(
-        (entry) => entry.role === "owner" && !entry.disabled,
-      );
-      if (admin.role === "owner" && owners.length <= 1) {
-        throw new Error("There must always be at least one active owner.");
-      }
-      admin.role = patch.role;
+  /*
+   * This check is a pre-flight for a clear error message before the round
+   * trip — the actual guarantee against removing the last active owner is
+   * the `admins_guard_last_owner` trigger (see
+   * supabase/migrations/00000000000003_functions.sql), which holds even
+   * under a race between two concurrent requests, unlike a plain
+   * check-then-write here on its own would.
+   */
+  if (
+    admin.role === "owner" &&
+    !admin.disabled &&
+    ((patch.role !== undefined && patch.role !== "owner") || patch.disabled === true)
+  ) {
+    const rows = unwrap(
+      await db()
+        .from("admins")
+        .select("id")
+        .eq("role", "owner")
+        .eq("disabled", false)
+        .neq("id", id)
+        .overrideTypes<Array<Pick<AdminRow, "id">>, { merge: false }>(),
+    );
+    if (rows.length === 0) {
+      throw new Error("There must always be at least one active owner.");
     }
+  }
 
-    if (credentials) {
-      admin.passwordHash = credentials.hash;
-      admin.passwordSalt = credentials.salt;
-    }
+  const rowPatch: Partial<AdminRow> = {};
+  if (patch.name !== undefined) rowPatch.name = patch.name.trim();
+  if (patch.disabled !== undefined) rowPatch.disabled = patch.disabled;
+  if (patch.role !== undefined) rowPatch.role = patch.role;
+  if (credentials) {
+    rowPatch.password_hash = credentials.hash;
+    rowPatch.password_salt = credentials.salt;
+  }
 
-    return admin;
-  });
+  const row = unwrap(
+    await updateTable(db(), "admins", rowPatch)
+      .eq("id", id)
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as AdminRow;
+
+  return fromRow(row);
 }
 
 export async function deleteAdmin(id: string): Promise<void> {
-  await mutateStore((store) => {
-    const admin = store.admins.find((entry) => entry.id === id);
-    if (!admin) return;
+  const admin = await findAdminById(id);
+  if (!admin) return;
 
-    const owners = store.admins.filter(
-      (entry) => entry.role === "owner" && !entry.disabled,
+  // Same pre-flight-only reasoning as updateAdmin(): the real guarantee is
+  // the admins_guard_last_owner trigger.
+  if (admin.role === "owner" && !admin.disabled) {
+    const rows = unwrap(
+      await db()
+        .from("admins")
+        .select("id")
+        .eq("role", "owner")
+        .eq("disabled", false)
+        .neq("id", id)
+        .overrideTypes<Array<Pick<AdminRow, "id">>, { merge: false }>(),
     );
-    if (admin.role === "owner" && owners.length <= 1) {
+    if (rows.length === 0) {
       throw new Error("You cannot remove the last owner.");
     }
+  }
 
-    store.admins = store.admins.filter((entry) => entry.id !== id);
-  });
+  const { error } = await db().from("admins").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function recordLogin(id: string): Promise<void> {
-  await mutateStore((store) => {
-    const admin = store.admins.find((entry) => entry.id === id);
-    if (admin) admin.lastLoginAt = new Date().toISOString();
-  });
+  const { error } = await updateTable(db(), "admins", {
+    last_login_at: new Date().toISOString(),
+  }).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 /*

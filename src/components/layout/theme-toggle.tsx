@@ -29,8 +29,12 @@ export function ThemeToggle({ className }: { className?: string }) {
       aria-label={goingDark ? "Switch to dark theme" : "Switch to light theme"}
       title={goingDark ? "Dark theme" : "Light theme"}
       className={cn(
-        "grid size-11 shrink-0 place-items-center rounded-full text-content transition-colors hover:bg-surface-sunken",
-        className,
+        "grid size-11 shrink-0 place-items-center rounded-full transition-colors",
+        // `cn()` is a plain concatenator (see its own doc comment), so a caller
+        // overriding colour has to fully replace these rather than append —
+        // otherwise both classes land in the DOM and the stylesheet's own
+        // source order decides the winner instead of the caller.
+        className ?? "text-content hover:bg-surface-sunken",
       )}
     >
       {goingDark ? (

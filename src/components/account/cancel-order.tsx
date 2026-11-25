@@ -60,7 +60,7 @@ export function CancelOrder({
       </button>
 
       {state.error && !open ? (
-        <p role="alert" className="mt-2 text-xs text-danger-500">
+        <p role="alert" className="mt-2 text-xs text-danger-500 dark:text-danger-100">
           {state.error}
         </p>
       ) : null}

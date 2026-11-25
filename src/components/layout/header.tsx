@@ -87,8 +87,8 @@ export function Header({
   return (
     <header
       className={cn(
-        "sticky top-0 z-80 bg-canvas/92 backdrop-blur-md transition-shadow duration-300",
-        scrolled && "border-b border-line shadow-xs",
+        "sticky top-0 z-80 border-b border-line/70 bg-surface/88 text-content shadow-sm backdrop-blur-xl supports-[backdrop-filter]:bg-surface/78 transition-[background-color,box-shadow] duration-300",
+        scrolled && "bg-surface/95 shadow-md",
       )}
       onMouseLeave={scheduleClose}
     >
@@ -131,8 +131,8 @@ export function Header({
                       className={cn(
                         "link-underline block py-2 text-2xs font-medium uppercase tracking-[0.14em] transition-colors",
                         item.label === "Sale"
-                          ? "text-danger-500 dark:text-clay-300"
-                          : "text-content hover:text-accent",
+                          ? "text-content underline underline-offset-2"
+                          : "text-content/80 hover:text-content",
                       )}
                     >
                       {item.label}
@@ -146,7 +146,7 @@ export function Header({
 
         {/* Centre: brand lockup, and where the opening animation lands. */}
         <div className="flex shrink-0 justify-center lg:flex-none">
-          <Logo name={storeName} flightTarget />
+          <Logo name={storeName} flightTarget className="text-content" />
         </div>
 
         {/* Right: utilities */}
@@ -155,17 +155,17 @@ export function Header({
             type="button"
             onClick={openSearch}
             aria-label="Search products"
-            className="grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-surface-sunken"
+            className="grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-accent-soft hover:text-accent"
           >
             <MagnifyingGlass size={19} aria-hidden />
           </button>
 
-          <ThemeToggle className="hidden sm:grid" />
+          <ThemeToggle className="hidden text-content hover:bg-accent-soft hover:text-accent sm:grid" />
 
           <Link
             href="/account"
             aria-label="Your account"
-            className="hidden size-11 place-items-center rounded-full text-content transition-colors hover:bg-surface-sunken sm:grid"
+            className="hidden size-11 place-items-center rounded-full text-content transition-colors hover:bg-accent-soft hover:text-accent sm:grid"
           >
             <User size={19} aria-hidden />
           </Link>
@@ -177,14 +177,14 @@ export function Header({
                 ? `Saved items, ${savedCount} saved`
                 : "Saved items"
             }
-            className="relative grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-surface-sunken"
+            className="relative grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-accent-soft hover:text-accent"
           >
             <Heart size={19} aria-hidden />
             {wishlistHydrated && savedCount > 0 ? (
               <span
                 data-numeric
                 aria-hidden
-                className="absolute right-1 top-1 grid min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-medium leading-4 text-on-accent"
+                className="absolute right-1 top-1 grid min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-4 text-on-accent shadow-sm"
               >
                 {savedCount}
               </span>
@@ -197,14 +197,14 @@ export function Header({
             aria-label={
               cartHydrated && cartCount > 0 ? `Your bag, ${cartCount} items` : "Your bag"
             }
-            className="relative grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-surface-sunken"
+            className="relative grid size-11 place-items-center rounded-full text-content transition-colors hover:bg-accent-soft hover:text-accent"
           >
             <Handbag size={19} aria-hidden />
             {cartHydrated && cartCount > 0 ? (
               <span
                 data-numeric
                 aria-hidden
-                className="absolute right-0.5 top-1 grid min-w-4 place-items-center rounded-full bg-inverse px-1 text-[10px] font-medium leading-4 text-on-inverse"
+                className="absolute right-0.5 top-1 grid min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-4 text-on-accent shadow-sm"
               >
                 {cartCount}
               </span>

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
 import type { SubmittedReview } from "@/lib/types";
 import {
   fitFromReasons,
@@ -7,10 +6,9 @@ import {
   reasonsForRating,
   type Rating,
 } from "@/lib/review-reasons";
-import { getDb, isDatabaseConfigured } from "../db/client";
-import { fromSubmittedReview, toSubmittedReview } from "../db/mappers";
-import { orders as ordersTable, orderLines, submittedReviews } from "../db/schema";
-import { mutateStore, readStore } from "../store";
+import { callRpc, db, unwrap } from "../supabase";
+import type { SubmittedReviewRow } from "../database.types";
+import { listOrdersForCustomer } from "./orders";
 
 /**
  * Customer reviews.
@@ -19,12 +17,28 @@ import { mutateStore, readStore } from "../store";
  * reviewing account placed, and that check lives in `submitReview` rather than being
  * trusted from the client.
  *
- * One review per account per product. A shopper who buys the same piece twice does not
- * get to review it twice.
- *
- * Two backends, chosen by whether a database is configured — see `login-attempts.ts`
- * for the precedent.
+ * One review per account per product — enforced by the `unique (customer_id,
+ * product_slug)` constraint on `submitted_reviews` (see
+ * `supabase/migrations/00000000000001_schema.sql`) and the race-safe
+ * `submit_review_once` RPC (see `00000000000003_functions.sql`), which is
+ * what the JSON store's serialised `mutateStore` queue used to guarantee for
+ * free.
  */
+
+function fromRow(row: SubmittedReviewRow): SubmittedReview {
+  return {
+    id: row.id,
+    productSlug: row.product_slug,
+    customerId: row.customer_id,
+    orderId: row.order_id,
+    author: row.author,
+    rating: row.rating as 1 | 2 | 3 | 4 | 5,
+    fit: row.fit,
+    reasons: row.reasons,
+    body: row.body,
+    createdAt: row.created_at,
+  };
+}
 
 export interface PendingReviewItem {
   productSlug: string;
@@ -36,20 +50,14 @@ export interface PendingReviewItem {
 
 /** Product slugs a customer has already reviewed. */
 async function reviewedSlugs(customerId: string): Promise<Set<string>> {
-  if (!isDatabaseConfigured()) {
-    const store = await readStore();
-    const set = new Set<string>();
-    for (const review of store.submittedReviews) {
-      if (review.customerId === customerId) set.add(review.productSlug);
-    }
-    return set;
-  }
-
-  const rows = await getDb()
-    .select({ productSlug: submittedReviews.productSlug })
-    .from(submittedReviews)
-    .where(eq(submittedReviews.customerId, customerId));
-  return new Set(rows.map((row) => row.productSlug));
+  const rows = unwrap(
+    await db()
+      .from("submitted_reviews")
+      .select("product_slug")
+      .eq("customer_id", customerId)
+      .overrideTypes<Array<Pick<SubmittedReviewRow, "product_slug">>, { merge: false }>(),
+  );
+  return new Set(rows.map((row) => row.product_slug));
 }
 
 /**
@@ -59,58 +67,27 @@ async function reviewedSlugs(customerId: string): Promise<Set<string>> {
  * reviewed. Deduplicated by slug — buying two colourways of the same coat is one review,
  * not two — keeping the earliest delivered order as the one that entitles it, so the
  * "verified purchase" it produces points at a real delivery.
+ *
+ * Built on `listOrders()` (an in-memory filter over every order) rather than
+ * a scoped query, mirroring the JSON store's own approach — `Order` has no
+ * `customerId` index worth adding for what is, in practice, one customer
+ * paging their own account, not an admin-scale query.
  */
 export async function listPendingReviewItems(
   customerId: string,
 ): Promise<PendingReviewItem[]> {
   const reviewed = await reviewedSlugs(customerId);
   const bySlug = new Map<string, PendingReviewItem>();
+  // This customer's orders only. It used to be `listOrders()` — the whole order book,
+  // with every line and note — filtered in memory, on every page view of every
+  // signed-in shopper.
+  const orders = await listOrdersForCustomer(customerId);
 
-  if (!isDatabaseConfigured()) {
-    const store = await readStore();
+  for (const order of orders) {
+    if (order.status !== "delivered") continue;
+    const deliveredAt = order.deliveredAt ?? order.placedAt;
 
-    for (const order of store.orders) {
-      if (order.customerId !== customerId) continue;
-      if (order.status !== "delivered") continue;
-      const deliveredAt = order.deliveredAt ?? order.placedAt;
-
-      for (const line of order.lines) {
-        if (reviewed.has(line.slug)) continue;
-
-        const existing = bySlug.get(line.slug);
-        if (!existing || deliveredAt < existing.deliveredAt) {
-          bySlug.set(line.slug, {
-            productSlug: line.slug,
-            productName: line.name,
-            colorName: line.colorName,
-            orderId: order.id,
-            deliveredAt,
-          });
-        }
-      }
-    }
-
-    return [...bySlug.values()].sort((a, b) => a.deliveredAt.localeCompare(b.deliveredAt));
-  }
-
-  const db = getDb();
-  const deliveredOrders = await db
-    .select({
-      id: ordersTable.id,
-      deliveredAt: ordersTable.deliveredAt,
-      placedAt: ordersTable.placedAt,
-    })
-    .from(ordersTable)
-    .where(and(eq(ordersTable.customerId, customerId), eq(ordersTable.status, "delivered")));
-
-  if (deliveredOrders.length === 0) return [];
-
-  const lines = await db.select().from(orderLines);
-
-  for (const order of deliveredOrders) {
-    const deliveredAt = (order.deliveredAt ?? order.placedAt).toISOString();
-
-    for (const line of lines.filter((l) => l.orderId === order.id)) {
+    for (const line of order.lines) {
       if (reviewed.has(line.slug)) continue;
 
       const existing = bySlug.get(line.slug);
@@ -133,29 +110,27 @@ export async function listPendingReviewItems(
 export async function listSubmittedReviewsForProduct(
   productSlug: string,
 ): Promise<SubmittedReview[]> {
-  if (!isDatabaseConfigured()) {
-    const store = await readStore();
-    return store.submittedReviews
-      .filter((review) => review.productSlug === productSlug)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
-
-  const rows = await getDb()
-    .select()
-    .from(submittedReviews)
-    .where(eq(submittedReviews.productSlug, productSlug));
-  return rows.map(toSubmittedReview).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const rows = unwrap(
+    await db()
+      .from("submitted_reviews")
+      .select("*")
+      .eq("product_slug", productSlug)
+      .order("created_at", { ascending: false })
+      .overrideTypes<SubmittedReviewRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }
 
 /** Every submitted review, newest first. For the admin moderation list. */
 export async function listAllSubmittedReviews(): Promise<SubmittedReview[]> {
-  if (!isDatabaseConfigured()) {
-    const store = await readStore();
-    return [...store.submittedReviews].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
-
-  const rows = await getDb().select().from(submittedReviews);
-  return rows.map(toSubmittedReview).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const rows = unwrap(
+    await db()
+      .from("submitted_reviews")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .overrideTypes<SubmittedReviewRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }
 
 export interface SubmitReviewInput {
@@ -215,59 +190,26 @@ export async function submitReview(input: SubmitReviewInput): Promise<SubmitRevi
     };
   }
 
-  const review: SubmittedReview = {
-    id: `rev_${randomUUID().slice(0, 12)}`,
-    productSlug: input.productSlug,
-    customerId: input.customerId,
-    orderId: entitlement.orderId,
-    author: input.author.trim() || "Verified buyer",
-    rating,
-    fit: fitFromReasons(reasons),
-    reasons,
-    body,
-    createdAt: new Date().toISOString(),
-  };
-
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      /*
-       * Guard the one-per-account-per-product rule inside the serialised mutation, so
-       * two concurrent submissions cannot both pass the entitlement check above and
-       * write two rows. The reasoning mirrors the OTP attempt counter.
-       */
-      const already = store.submittedReviews.some(
-        (existing) =>
-          existing.customerId === review.customerId &&
-          existing.productSlug === review.productSlug,
-      );
-      if (!already) store.submittedReviews.unshift(review);
-    });
-
-    return { ok: true, review };
-  }
-
-  const db = getDb();
-  await db.transaction(async (tx) => {
-    /*
-     * Guard the one-per-account-per-product rule inside the transaction, so two
-     * concurrent submissions cannot both pass the entitlement check above and write
-     * two rows. The reasoning mirrors the OTP attempt counter and the JSON-store branch
-     * above.
-     */
-    const [existing] = await tx
-      .select({ id: submittedReviews.id })
-      .from(submittedReviews)
-      .where(
-        and(
-          eq(submittedReviews.customerId, review.customerId),
-          eq(submittedReviews.productSlug, review.productSlug),
-        ),
-      );
-
-    if (!existing) {
-      await tx.insert(submittedReviews).values(fromSubmittedReview(review));
-    }
+  const { data, error } = await callRpc(db(), "submit_review_once", {
+    p_id: `rev_${randomUUID().slice(0, 12)}`,
+    p_product_slug: input.productSlug,
+    p_customer_id: input.customerId,
+    p_order_id: entitlement.orderId,
+    p_author: input.author.trim() || "Verified buyer",
+    p_rating: rating,
+    p_fit: fitFromReasons(reasons),
+    p_reasons: reasons,
+    p_body: body,
   });
 
-  return { ok: true, review };
+  if (error) throw new Error(error.message);
+  if (!data) {
+    // submit_review_once() always returns a row — either the one just
+    // inserted, or (on the losing side of a race against a concurrent
+    // submission for the same customer+product) the one that won. A null
+    // here means the RPC itself is broken, not a normal outcome.
+    throw new Error("Could not record the review.");
+  }
+
+  return { ok: true, review: fromRow(data) };
 }

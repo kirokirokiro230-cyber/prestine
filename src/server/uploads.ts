@@ -1,34 +1,26 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
   ACCEPTED_IMAGE_TYPES,
+  isUploadedImage,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_LABEL,
-  isUploadedImage,
   type UploadedType,
 } from "@/lib/uploads";
-import { putObject, storageDriver } from "./storage";
+import { uploadToStorage } from "./storage";
 
-export { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, isUploadedImage };
+export { ACCEPTED_IMAGE_TYPES, isUploadedImage, MAX_UPLOAD_BYTES };
 
 /**
  * Image storage for the admin panel.
  *
  * ## Where files go
  *
- * Two destinations, chosen at runtime by `storageDriver()` — see `src/server/storage.ts`
- * for the selection rules:
- *
- * - **disk**: `data/uploads/`, next to `data/store.json`, served by the route handler at
- *   `src/app/uploads/[file]/route.ts`. Files deliberately do **not** live in `public/`:
- *   that directory is build *input*, and mixing merchant content into it means a deploy
- *   either wipes the uploads or bakes them into the image.
- * - **supabase**: a public Storage bucket, returning its CDN URL directly. Required on
- *   Netlify and Vercel, where the filesystem is read-only and per-invocation.
- *
- * Callers get a URL and nothing else. Validation, naming and sniffing are identical on
- * both paths — only the final write differs, which is the whole point of the split.
+ * Every uploaded image goes to the Supabase Storage bucket named by
+ * `SUPABASE_STORAGE_BUCKET` (see `src/server/storage.ts`), served straight
+ * from Supabase's CDN rather than a route handler this app owns. There is
+ * no local disk path any more — every host this app runs on now reads and
+ * writes the same bucket, which is what makes an uploaded photo look
+ * identical whether the app is on a VPS or on Vercel.
  *
  * ## Why the checks are what they are
  *
@@ -41,9 +33,9 @@ export { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES, isUploadedImage };
  *   friendly file extension. There is no safe way to serve arbitrary SVG inline, so it
  *   is rejected rather than sanitised.
  * - **The client never names the file.** The name is a hash of the contents, so
- *   `../../.env` and friends cannot be expressed, and two uploads of the same image
- *   collapse into one file.
- * - **Size is capped** before anything is written.
+ *   path traversal cannot be expressed, and two uploads of the same image collapse into
+ *   one object in the bucket.
+ * - **Size is capped** before anything is uploaded.
  */
 
 const EXTENSIONS: Record<UploadedType, string> = {
@@ -53,34 +45,6 @@ const EXTENSIONS: Record<UploadedType, string> = {
   "image/avif": "avif",
   "image/gif": "gif",
 };
-
-/**
- * Where the bytes live, and the path to one file inside it.
- *
- * Both are written as a single fully-spelled-out `path.join` so the build can prove the
- * result stays under `data/uploads`. Composing them — joining a directory helper with a
- * filename — reads better but defeats that analysis, and Turbopack then traces the entire
- * project into the server output because it cannot tell which paths are reachable.
- *
- * The `PRESTINE_UPLOAD_DIR` override exists only for the test suite, which does not run
- * through the bundler, so that branch carries the ignore marker instead.
- */
-function uploadDir(): string {
-  const override = process.env.PRESTINE_UPLOAD_DIR;
-  if (!override) return path.join(process.cwd(), "data", "uploads");
-
-  return path.join(/* turbopackIgnore: true */ process.cwd(), override);
-}
-
-function uploadPath(name: string): string {
-  const override = process.env.PRESTINE_UPLOAD_DIR;
-  if (!override) return path.join(process.cwd(), "data", "uploads", name);
-
-  return path.join(/* turbopackIgnore: true */ process.cwd(), override, name);
-}
-
-/** The public path a saved file is reachable at. */
-const PUBLIC_PREFIX = "/uploads/";
 
 /**
  * Identify an image from its leading bytes.
@@ -121,7 +85,7 @@ export type SaveResult =
   | { ok: false; error: string };
 
 /**
- * Validate and store one image, returning the URL to reference it by.
+ * Validate and store one image, returning the public URL to reference it by.
  *
  * Never throws for bad input — a merchant dropping a PDF is an ordinary event, not an
  * exception, and the caller needs the message to show them.
@@ -150,68 +114,18 @@ export async function saveImage(file: File): Promise<SaveResult> {
   /**
    * Content-addressed name: same bytes, same file, uploaded once. Sixteen hex
    * characters of SHA-256 is 64 bits — far beyond collision range for a product
-   * catalogue, and short enough to stay readable in a URL.
+   * catalogue, and short enough to stay readable in a URL. Prefixed with a fixed
+   * folder inside the bucket rather than left flat, purely so the bucket's own file
+   * browser in the Supabase dashboard is navigable — it has no bearing on the URL a
+   * merchant or the storefront ever sees.
    */
   const digest = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const name = `${digest}.${EXTENSIONS[type]}`;
+  const name = `products/${digest}.${EXTENSIONS[type]}`;
 
-  if (storageDriver() === "supabase") {
-    const stored = await putObject(name, bytes, type);
-    if (!stored.ok) return { ok: false, error: stored.error };
-    return { ok: true, url: stored.url, type, bytes: file.size };
+  const result = await uploadToStorage(name, bytes, type);
+  if (!result.ok) {
+    return { ok: false, error: `Could not upload that image: ${result.error}` };
   }
 
-  await mkdir(uploadDir(), { recursive: true });
-  await writeFile(uploadPath(name), bytes);
-
-  return { ok: true, url: `${PUBLIC_PREFIX}${name}`, type, bytes: file.size };
-}
-
-export type ReadResult =
-  /**
-   * `Uint8Array<ArrayBuffer>`, not a bare `Uint8Array`. The default type parameter is
-   * `ArrayBufferLike`, which allows a `SharedArrayBuffer` — and a shared buffer is not a
-   * valid response body, so the serving route would not type-check. Being specific here
-   * is what keeps the route free of casts.
-   */
-  | { ok: true; bytes: Uint8Array<ArrayBuffer>; type: UploadedType }
-  | { ok: false };
-
-/**
- * Read a stored image for the serving route.
- *
- * The requested name is matched against the exact pattern this module writes rather
- * than being joined onto a path and hoped for. `..`, absolute paths, encoded
- * separators and every other traversal trick fail the pattern, so no path arithmetic
- * is ever performed on caller-supplied text.
- */
-export async function readImage(name: string): Promise<ReadResult> {
-  if (!isUploadedImage(`${PUBLIC_PREFIX}${name}`)) return { ok: false };
-
-  const extension = name.slice(name.lastIndexOf(".") + 1);
-  const type = (Object.keys(EXTENSIONS) as UploadedType[]).find(
-    (candidate) => EXTENSIONS[candidate] === extension,
-  );
-  if (!type) return { ok: false };
-
-  try {
-    /*
-     * The join is spelled out here rather than taken from `uploadPath`, because the
-     * build's static analysis cannot see through a function call — and a `readFile` it
-     * cannot resolve is what makes it trace the entire project into the server bundle.
-     * Writing does not have this problem; only reading pulls files into the trace.
-     */
-    const override = process.env.PRESTINE_UPLOAD_DIR;
-    const raw = override
-      ? await readFile(path.join(/* turbopackIgnore: true */ process.cwd(), override, name))
-      : await readFile(path.join(process.cwd(), "data", "uploads", name));
-
-    const bytes = new Uint8Array(raw);
-    // Re-sniff on the way out. A file that is not what its extension claims must not
-    // be served with a Content-Type derived from that claim.
-    if (sniffImageType(bytes) !== type) return { ok: false };
-    return { ok: true, bytes, type };
-  } catch {
-    return { ok: false };
-  }
+  return { ok: true, url: result.url, type, bytes: file.size };
 }

@@ -29,7 +29,7 @@ const settings: StoreSettings = {
   freeShippingThreshold: 20000,
   standardShippingRate: 900,
   taxRate: 0.2,
-  returnWindowDays: 30,
+  returnWindowHours: 48,
   deliveryDaysMin: 3,
   deliveryDaysMax: 5,
   reviewRequestDelayDays: 5,
@@ -39,6 +39,11 @@ const settings: StoreSettings = {
   homeNewArrivalsCount: 4,
   servicePromises: [],
   shippingReturnsCopy: [],
+  codEnabled: false,
+  codFee: 0,
+  codMinOrder: 0,
+  codMaxOrder: 0,
+  firstOrderDiscountPercent: 0,
   maintenanceMode: false,
 };
 
@@ -47,6 +52,8 @@ function orderWith(overrides: Partial<Order> = {}): Order {
     id: "PR-260830-ABCD",
     placedAt: "2026-08-30T10:00:00.000Z",
     status: "processing",
+    paymentStatus: "paid",
+    paymentMethod: "prepaid",
     email: "buyer@example.com",
     lines: [
       {
@@ -60,7 +67,7 @@ function orderWith(overrides: Partial<Order> = {}): Order {
         category: "knitwear",
       },
     ],
-    totals: { subtotal: 24000, discount: 0, shipping: 0, tax: 4800, total: 28800 },
+    totals: { subtotal: 24000, discount: 0, shipping: 0, tax: 4800, codFee: 0, total: 28800 },
     shippingAddress: {
       name: "Asha Kapoor",
       line1: "12 Mill Lane",

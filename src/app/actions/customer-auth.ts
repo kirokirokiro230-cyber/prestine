@@ -1,17 +1,15 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { phoneError } from "@/lib/phone";
+import { normalisePhone, phoneError } from "@/lib/phone";
+import { safeInternalPath } from "@/lib/safe-redirect";
 import { hashPassword, validatePasswordStrength, verifyPassword } from "@/server/auth";
 import {
   createCustomer,
   findCustomerByPhone,
   recordCustomerLogin,
-  setCustomerAuthUserId,
   setCustomerPassword,
 } from "@/server/customers";
-import { ensureAuthUser } from "@/server/supabase-auth";
 import {
   endCustomerSession,
   startCustomerSession,
@@ -22,6 +20,7 @@ import {
   recordFailedLogin,
 } from "@/server/login-attempts";
 import { lockoutMessage } from "@/lib/login-throttle";
+import { clientIp } from "@/server/client-ip";
 import { issueCode, verifyCode } from "@/server/otp";
 
 /**
@@ -50,38 +49,11 @@ export interface AuthFormState {
   phone?: string;
 }
 
-async function clientKey(): Promise<string> {
-  const list = await headers();
-  return list.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
-}
+const clientKey = clientIp;
 
+// Only internal redirects — see `safeInternalPath` for why a prefix check is not enough.
 function internalNext(next: string, fallback = "/account"): string {
-  // Only allow internal redirects — an open redirect here would be a phishing gift.
-  return next.startsWith("/") && !next.startsWith("//") ? next : fallback;
-}
-
-/**
- * Bridge a just-verified customer into Supabase Auth.
- *
- * Runs only after the OTP has been confirmed, which is the whole point of the bridge:
- * this app's code decides the number is genuine, and a success then ensures a matching
- * `auth.users` identity exists and records its id on the row. That id is what row-level
- * security reads through `auth.uid()`.
- *
- * Deliberately swallows every failure. A customer who has proven they hold their number
- * must get their session whether or not Supabase Auth is reachable — `authUserId` is
- * nullable exactly so it can be filled in on a later verification. When the bridge is not
- * configured at all (local development on the JSON store), `ensureAuthUser` returns null
- * and this is a no-op.
- */
-async function bridgeToSupabaseAuth(customerId: string, phone: string): Promise<void> {
-  try {
-    const authUserId = await ensureAuthUser(phone);
-    if (authUserId) await setCustomerAuthUserId(customerId, authUserId);
-  } catch (error) {
-    // Logged, never rethrown — see the note above on why this cannot block sign-in.
-    console.error("[customer-auth] Supabase Auth bridge failed:", error);
-  }
+  return safeInternalPath(next, fallback);
 }
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +103,9 @@ export async function requestSignupCode(
     phone,
     purpose: "signup",
     pending: { name, email: email || undefined, passwordHash: hash, passwordSalt: salt },
+    // Signup will issue to a number with no account, which makes it the cheapest
+    // path to burning SMS credit by rotating numbers. Capped per caller too.
+    ip: await clientKey(),
   });
 
   if (!result.ok) return { error: result.error, phone };
@@ -179,9 +154,6 @@ export async function completeSignup(
     phoneVerifiedAt: new Date().toISOString(),
   });
 
-  // A brand-new number: create its Supabase Auth identity and link it.
-  await bridgeToSupabaseAuth(customer.id, customer.phone);
-
   await startCustomerSession(customer);
   redirect(internalNext(next));
 }
@@ -203,9 +175,17 @@ export async function signIn(
   }
 
   const ip = await clientKey();
-  const keys = [`customer-phone:${phone}`, `customer-ip:${ip}`];
 
-  const lockouts = await Promise.all(keys.map(loginLockout));
+  /*
+   * Keyed on the normalised number, not the string as typed. `98765 43210`,
+   * `+919876543210` and `09876543210` are one account, and keying on the raw input
+   * gave an attacker a fresh five-guess allowance for every spelling of it.
+   */
+  const keys = [`customer-phone:${normalisePhone(phone) ?? phone}`, `customer-ip:${ip}`];
+
+  // Explicit arrow, never `keys.map(loginLockout)`: map would pass the array index
+  // as the second argument. See the note on `loginLockout`.
+  const lockouts = await Promise.all(keys.map((key) => loginLockout(key)));
   const locked = lockouts.find((lockout) => lockout.locked);
   if (locked) return { error: lockoutMessage(locked), phone };
 
@@ -266,7 +246,11 @@ export async function requestPasswordResetCode(
 
   if (!customer) return silent;
 
-  const result = await issueCode({ phone, purpose: "password-reset" });
+  const result = await issueCode({
+    phone,
+    purpose: "password-reset",
+    ip: await clientKey(),
+  });
   if (!result.ok) return silent;
 
   return {
@@ -301,13 +285,6 @@ export async function completePasswordReset(
   }
 
   await setCustomerPassword(customer.id, password);
-
-  // A returning number: find (or, for an account that predates the bridge, create) its
-  // Supabase Auth identity and link it if it is not linked yet.
-  if (!customer.authUserId) {
-    await bridgeToSupabaseAuth(customer.id, customer.phone);
-  }
-
   await startCustomerSession(customer);
 
   redirect("/account");

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { TaxonomyManager } from "@/components/admin/taxonomy-manager";
 import { categoryUsage, listCategories } from "@/server/repositories/taxonomy";
 import { requirePermission } from "@/server/session";
@@ -12,14 +13,11 @@ export default async function CategoriesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="font-display text-3xl leading-tight">Categories</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-content-muted">
-          Categories are the structural navigation of the store — every product belongs
-          to exactly one. Renaming a slug moves its products with it; deleting one is
-          only possible once it is empty.
-        </p>
-      </header>
+      <AdminPageHeader
+        eyebrow="Catalogue"
+        title="Categories"
+        description="Categories structure storefront navigation. Every product belongs to one; slug changes move assigned products automatically."
+      />
 
       <TaxonomyManager
         kind="category"

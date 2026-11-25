@@ -38,11 +38,22 @@ export const config = {
    * should go quiet during maintenance too.
    */
   matcher: [
-    "/((?!_next/static|_next/image|maintenance|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|maintenance|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|wav|mp3|ogg)$).*)",
   ],
 };
 
 const PUBLIC_ADMIN_PATHS = ["/admin/login", "/admin/setup"];
+
+/**
+ * Endpoints called by other systems, not by shoppers. See the maintenance check below
+ * for why these must keep working while the storefront is closed.
+ */
+const MAINTENANCE_EXEMPT_PATHS = new Set([
+  "/api/payments/cashfree/webhook",
+  "/api/webhooks/delhivery",
+  "/api/shipping/sync-tracking",
+  "/api/email/review-requests",
+]);
 
 /**
  * Optional network lock on the whole admin panel.
@@ -104,6 +115,22 @@ export async function proxy(request: NextRequest) {
   // so a merchant can reprice or restyle with the shop closed and still check the
   // result on the live site.
   if (hasSession) return NextResponse.next();
+
+  /*
+   * Machine-to-machine endpoints stay open while the shop is closed.
+   *
+   * Maintenance mode exists to stop shoppers browsing, and it was answering these with
+   * a 503 as well. That has real costs: Cashfree's payment webhook is refused, so a
+   * customer who paid just before the shop closed is not recorded as paid until it
+   * reopens; Delhivery's webhook is refused; and the scheduled tracking sweep gets a 503,
+   * so parcels stop advancing for as long as the shop is shut.
+   *
+   * Safe to exempt because none of them rely on this gate: each refuses a caller without
+   * its own credential (a signature, or a bearer secret that is checked in constant time
+   * and fails closed when unset). The list is exact paths, not a prefix, so a new route
+   * under /api is closed during maintenance unless someone opts it in here on purpose.
+   */
+  if (MAINTENANCE_EXEMPT_PATHS.has(pathname)) return NextResponse.next();
 
   // Cached with a short TTL and failing open — see `src/server/maintenance.ts`. This
   // runs on every storefront request, so it must not be a query per page view.

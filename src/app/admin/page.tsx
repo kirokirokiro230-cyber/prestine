@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Package, Receipt, Warning } from "@phosphor-icons/react/dist/ssr";
 import { BarList, RevenueChart } from "@/components/admin/revenue-chart";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { Panel, StatCard, StatusPill } from "@/components/admin/primitives";
 import { createMoneyFormatter, formatDate } from "@/lib/format";
 import { listAudit } from "@/server/audit";
@@ -43,38 +44,38 @@ export default async function AdminDashboard({
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl leading-tight">
-            {greeting()}, {admin.name.split(" ")[0]}
-          </h1>
-          <p className="mt-1.5 text-sm text-content-muted">
-            {metrics.statusCounts.processing > 0
-              ? `${metrics.statusCounts.processing} order${
-                  metrics.statusCounts.processing === 1 ? "" : "s"
-                } waiting to be fulfilled.`
-              : "Nothing waiting to be fulfilled."}
-          </p>
-        </div>
-
-        {/* Window switcher — plain links, so the range is shareable */}
-        <nav aria-label="Reporting period" className="flex items-center gap-1">
-          {WINDOWS.map((window) => (
-            <Link
-              key={window.days}
-              href={`/admin?days=${window.days}`}
-              aria-current={window.days === days ? "page" : undefined}
-              className={
-                window.days === days
-                  ? "border border-line-strong bg-inverse px-3 py-2 text-2xs uppercase tracking-[0.1em] text-on-inverse"
-                  : "border border-line px-3 py-2 text-2xs uppercase tracking-[0.1em] text-content-muted transition-colors hover:border-line-strong hover:text-content"
-              }
-            >
-              {window.label}
-            </Link>
-          ))}
-        </nav>
-      </header>
+      <AdminPageHeader
+        eyebrow="Overview"
+        title={`${greeting()}, ${admin.name.split(" ")[0]}`}
+        description={
+          metrics.statusCounts.processing > 0
+            ? `${metrics.statusCounts.processing} order${
+                metrics.statusCounts.processing === 1 ? "" : "s"
+              } waiting to be fulfilled.`
+            : "Everything is up to date. Nothing is waiting to be fulfilled."
+        }
+        actions={
+          <nav
+            aria-label="Reporting period"
+            className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-xs"
+          >
+            {WINDOWS.map((window) => (
+              <Link
+                key={window.days}
+                href={`/admin?days=${window.days}`}
+                aria-current={window.days === days ? "page" : undefined}
+                className={
+                  window.days === days
+                    ? "rounded-lg bg-accent px-3 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-on-accent shadow-sm"
+                    : "rounded-lg px-3 py-2 text-2xs font-semibold uppercase tracking-[0.1em] text-content-muted transition-colors hover:bg-surface-sunken hover:text-content"
+                }
+              >
+                {window.label}
+              </Link>
+            ))}
+          </nav>
+        }
+      />
 
       {/* Headline metrics */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -94,6 +95,12 @@ export default async function AdminDashboard({
           label="Average order"
           value={money(metrics.averageOrderValue)}
           change={metrics.aovChange}
+        />
+        <StatCard
+          label="To fulfil"
+          value={String(metrics.statusCounts.processing)}
+          hint={metrics.statusCounts.processing === 1 ? "order waiting" : "orders waiting"}
+          href="/admin/orders?status=processing"
         />
       </div>
 
@@ -164,7 +171,8 @@ export default async function AdminDashboard({
               No orders yet. They will appear here the moment one is placed.
             </p>
           ) : (
-            <table className="w-full text-sm">
+            <div className="scrollbar-thin overflow-x-auto">
+              <table className="w-full min-w-[36rem] text-sm">
               <caption className="sr-only">Most recent orders</caption>
               <thead>
                 <tr className="border-b border-line text-left">
@@ -214,7 +222,8 @@ export default async function AdminDashboard({
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </Panel>
 
@@ -230,12 +239,12 @@ export default async function AdminDashboard({
                   ["cancelled", "Cancelled", Warning],
                 ] as const
               ).map(([status, label, Icon]) => (
-                <div key={status} className="border border-line px-3 py-3">
+                <div key={status} className="rounded-xl border border-line bg-surface-sunken/50 px-3 py-3 transition-colors hover:border-line-strong">
                   <dt className="flex items-center gap-1.5 text-2xs uppercase tracking-[0.1em] text-content-muted">
                     <Icon size={12} aria-hidden />
                     {label}
                   </dt>
-                  <dd data-numeric className="mt-1.5 font-display text-2xl leading-none">
+                  <dd data-numeric className="mt-2 font-sans text-2xl font-bold leading-none tracking-[-0.03em]">
                     <Link href={`/admin/orders?status=${status}`} className="hover:text-accent">
                       {metrics.statusCounts[status]}
                     </Link>

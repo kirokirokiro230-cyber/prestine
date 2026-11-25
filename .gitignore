@@ -13,19 +13,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Server data store. Holds the live catalogue, orders, customer addresses and
-# hashed admin credentials — never commit it. The store seeds itself from
-# src/lib/config.ts and src/lib/data/products.ts on first run.
-data/store.json
-data/store.json.*.tmp
-
-# Merchant-uploaded product and banner photography. User content, not source —
-# and back it up separately, because nothing else in the repo replaces it.
-data/uploads/
-
-# Scratch stores written by the test suite.
-.test-store/
-
-# Pre-migration database exports (scripts/_backup-database.mts). Real customer PII —
-# order emails, addresses, phone numbers. Never commit.
-backups/
+# Local Supabase CLI state, if `supabase start` is ever used for a local Postgres
+# instance during development.
+supabase/.temp/
+supabase/.branches/

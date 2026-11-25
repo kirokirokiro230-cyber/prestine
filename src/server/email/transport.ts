@@ -51,9 +51,9 @@ export interface ResendConfig {
 /**
  * Resend settings, or null when they are not all present.
  *
- * All or nothing, for the reason `supabaseStorageConfig` is: a half-configured transport
- * that silently degrades is how you find out weeks later that no customer has had a
- * confirmation. The from-address lives in the environment rather than in settings because
+ * All or nothing: a half-configured transport that silently degrades is how you find out
+ * weeks later that no customer has had a confirmation. The from-address lives in the
+ * environment rather than in settings because
  * it must be on a domain verified with the provider — a merchant typing an arbitrary
  * address into a form would produce sends that are rejected at the provider, which is a
  * failure mode with no visible cause.
@@ -122,7 +122,7 @@ export type SendResult =
  * Never throws. Every caller is either fulfilling an order or handling a status change,
  * and neither may fail because email did — a customer whose confirmation bounced still
  * bought the coat. Failures come back as a value so the caller records them and carries
- * on, the same contract `putObject` and `checkPincode` already use.
+ * on, the same contract `checkPincode` already uses.
  */
 export async function sendEmail(
   to: string,

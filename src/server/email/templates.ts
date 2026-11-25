@@ -1,5 +1,6 @@
 import type { EmailTemplate, Order, StoreSettings } from "@/lib/types";
 import { addressName } from "@/lib/format";
+import { formatReturnWindow, returnWindowInDays } from "@/lib/returns";
 
 /**
  * Turning merchant-written copy into a sendable message.
@@ -33,20 +34,20 @@ import { addressName } from "@/lib/format";
 /* ------------------------------------------------------------------ */
 
 /**
- * The same warm ink / bone / clay palette the storefront is built on
+ * The same black, white and warm-cream palette used by the storefront
  * (`src/app/globals.css`), spelled out as literal hex rather than referenced, because an
  * email client reads none of the app's CSS variables. Kept in one place so the shell,
  * the item table and the CTA button can never drift out of step with each other.
  */
-const INK_950 = "#0d0c0a";
-const INK_900 = "#171512";
-const INK_500 = "#605c54";
-const BONE_100 = "#fbf9f6";
-const BONE_200 = "#f5f1ea";
-const CLAY_600 = "#85543c";
-const CLAY_700 = "#6a4331";
-/** A hairline rule, one step warmer than pure grey — matches `--sem-line`. */
-const HAIRLINE = "#ece6db";
+const INK_950 = "#0a0a0a";
+const INK_900 = "#141414";
+const INK_500 = "#595959";
+const BONE_100 = "#faf7f0";
+const BONE_200 = "#f1ece2";
+const CLAY_600 = "#242321";
+const CLAY_700 = "#171615";
+/** A hairline rule, matching `--sem-line`. */
+const HAIRLINE = "#e2ddd3";
 
 /** Matches `--font-sans` / `--font-display` in globals.css, minus the variable fonts. */
 const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
@@ -81,7 +82,15 @@ export const EMAIL_TOKENS: Array<{ token: string; describes: string }> = [
   { token: "{{itemLines}}", describes: "The items, as a list" },
   { token: "{{shippingAddress}}", describes: "Delivery address, multi-line" },
   { token: "{{deliveryEstimate}}", describes: "e.g. 3–5 business days" },
-  { token: "{{returnWindowDays}}", describes: "Your returns window in days" },
+  { token: "{{returnWindow}}", describes: 'Your returns window, e.g. "48 hours"' },
+  /*
+   * Superseded by `{{returnWindow}}` when the window moved to hours, but still
+   * substituted: templates are editable and saved in the database, so a merchant's
+   * live copy may well contain it. Dropping the token would leave the literal
+   * braces in a customer's inbox. Listed as deprecated so new edits reach for the
+   * one that can say "48 hours" instead of rounding it to "2".
+   */
+  { token: "{{returnWindowDays}}", describes: "Deprecated — rounds to whole days. Use {{returnWindow}}." },
   { token: "{{trackingBlock}}", describes: "Carrier and tracking number, if known" },
   { token: "{{cancellationReason}}", describes: "Why it was cancelled, if given" },
   { token: "{{orderUrl}}", describes: "Link to look the order up" },
@@ -154,11 +163,11 @@ function itemLines(order: Order, settings: StoreSettings): TokenValue {
   const html = rows
     .map(
       (row, index) => `<tr>
-  <td style="padding:14px 0;${index > 0 ? "border-top:1px solid #ece6db;" : ""}font-size:14px;line-height:1.5;color:${INK_900};font-family:${SANS};">
+  <td style="padding:14px 0;${index > 0 ? `border-top:1px solid ${HAIRLINE};` : ""}font-size:14px;line-height:1.5;color:${INK_900};font-family:${SANS};">
     <span style="font-weight:600;">${escapeHtml(row.label)}</span><br />
     <span style="color:${INK_500};font-size:13px;">Qty ${row.quantity}</span>
   </td>
-  <td style="padding:14px 0;${index > 0 ? "border-top:1px solid #ece6db;" : ""}font-size:14px;color:${INK_900};font-family:${SANS};text-align:right;white-space:nowrap;vertical-align:top;">
+  <td style="padding:14px 0;${index > 0 ? `border-top:1px solid ${HAIRLINE};` : ""}font-size:14px;color:${INK_900};font-family:${SANS};text-align:right;white-space:nowrap;vertical-align:top;">
     ${escapeHtml(row.amount)}
   </td>
 </tr>`,
@@ -209,7 +218,9 @@ function tokensFor(order: Order, settings: StoreSettings): Record<string, TokenV
     deliveryEstimate: plain(
       `${settings.deliveryDaysMin}–${settings.deliveryDaysMax} business days`,
     ),
-    returnWindowDays: plain(String(settings.returnWindowDays)),
+    returnWindow: plain(formatReturnWindow(settings.returnWindowHours)),
+    // Kept for templates saved before the window moved to hours. See TOKENS above.
+    returnWindowDays: plain(String(returnWindowInDays(settings.returnWindowHours))),
     trackingBlock: trackingBlock(order),
     cancellationReason: order.cancellationReason
       ? plain(`Reason given: ${order.cancellationReason}`)

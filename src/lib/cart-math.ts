@@ -1,7 +1,9 @@
 import { promoCodes, site } from "./config";
+import { firstOrderAmount } from "./first-order";
 import type {
   CartLine,
   OrderSummary,
+  PaymentMethod,
   PromoCode,
 } from "./types";
 
@@ -48,6 +50,22 @@ export interface PricingRules {
   promoCodes: PromoCode[];
   locale: string;
   currency: string;
+  /** Whether cash on delivery is offered at all. */
+  codEnabled: boolean;
+  /** Minor units added to a COD order. Zero means the merchant absorbs it. */
+  codFee: number;
+  /** Minor units. Zero means no floor. */
+  codMinOrder: number;
+  /** Minor units. Zero means no ceiling. */
+  codMaxOrder: number;
+  /**
+   * Percentage off a customer's first order. Zero means the offer is off.
+   *
+   * This is the OFFER. Whether a particular customer still has it to use is a separate
+   * question the server answers (`first_order_discount_status`), and is passed to
+   * `orderSummary` as `firstOrder`.
+   */
+  firstOrderPercent: number;
 }
 
 /**
@@ -55,6 +73,11 @@ export interface PricingRules {
  *
  * Used by the browser only. It can be a snapshot because it drives display, and
  * anything it gets wrong is corrected by the server before money moves.
+ *
+ * COD defaults to unavailable here. The browser learns the real answer from the
+ * live rules the cart provider is given, and defaulting to "off" means a
+ * mis-wired page offers fewer options rather than offering one the server will
+ * then refuse.
  */
 export const defaultPricingRules: PricingRules = {
   taxRate: site.taxRate,
@@ -65,6 +88,11 @@ export const defaultPricingRules: PricingRules = {
   promoCodes,
   locale: site.locale,
   currency: site.currency,
+  codEnabled: false,
+  codFee: 0,
+  codMinOrder: 0,
+  codMaxOrder: 0,
+  firstOrderPercent: 0,
 };
 
 export function lineSubtotal(line: CartLine): number {
@@ -167,10 +195,31 @@ export interface SummaryInput {
   chargeTax?: boolean;
   /** Live rules from the store. Omit in the browser to use the seeded values. */
   rules?: PricingRules;
+  /**
+   * Which method the total is being quoted for. Defaults to prepaid, so every
+   * existing caller keeps its current behaviour and no COD fee appears until a
+   * shopper actually chooses COD.
+   */
+  paymentMethod?: PaymentMethod;
+  /**
+   * The customer is eligible for the first-order discount. Decided by the server, never
+   * inferred here: eligibility depends on order history, which this file cannot see. The
+   * browser passes what the server last told it; `placeOrder` passes what the database says
+   * at the moment of ordering.
+   */
+  firstOrder?: boolean;
 }
 
-/** Totals plus the promotion that was actually applied, if any. */
-export type ResolvedOrderSummary = OrderSummary & { promo?: PromoCode };
+/**
+ * Totals plus what was applied, if anything.
+ *
+ * At most one of `promo` and `firstOrder` is set: the first-order discount does not stack
+ * with a promotion code, and the larger of the two applies.
+ */
+export type ResolvedOrderSummary = OrderSummary & {
+  promo?: PromoCode;
+  firstOrder?: { percent: number };
+};
 
 /** The single source of truth for order totals. */
 export function orderSummary({
@@ -178,6 +227,8 @@ export function orderSummary({
   promoCode,
   chargeTax = true,
   rules = defaultPricingRules,
+  paymentMethod = "prepaid",
+  firstOrder = false,
 }: SummaryInput): ResolvedOrderSummary {
   const subtotal = merchandiseSubtotal(lines);
 
@@ -191,18 +242,87 @@ export function orderSummary({
     }
   }
 
+  /*
+   * One discount, the better one. Stacking would let a 25% code and the first-order
+   * discount combine into a margin nobody chose, and picking the larger means a customer is
+   * never worse off for having a code. On a tie the code wins, which leaves the
+   * single-use first-order discount unspent for their next order.
+   */
+  let firstOrderApplied: { percent: number } | undefined;
+  if (firstOrder && rules.firstOrderPercent > 0) {
+    const offered = firstOrderAmount(subtotal, rules.firstOrderPercent);
+
+    if (offered > discount) {
+      discount = offered;
+      promo = undefined;
+      firstOrderApplied = { percent: rules.firstOrderPercent };
+    }
+  }
+
   const discounted = Math.max(0, subtotal - discount);
   const shipping = lines.length === 0 ? 0 : shippingCost(discounted, rules);
   const tax = chargeTax ? Math.round(discounted * rules.taxRate) : 0;
+
+  /*
+   * Added after tax and not included in the tax base, matching how shipping is
+   * already treated here. It is a handling charge on the payment method, not on
+   * the goods.
+   */
+  const codFee =
+    paymentMethod === "cod" && lines.length > 0 ? Math.max(0, rules.codFee) : 0;
 
   return {
     subtotal,
     discount,
     shipping,
     tax,
-    total: discounted + shipping + tax,
+    codFee,
+    total: discounted + shipping + tax + codFee,
     promo,
+    firstOrder: firstOrderApplied,
   };
+}
+
+/**
+ * Whether COD may be offered for a given basket, on the merchant's own rules.
+ *
+ * Pincode serviceability is a separate question answered by Delhivery and
+ * checked server-side in `placeOrder` — this covers only what the shop decides.
+ * Shared so the checkout UI and the server reach the same verdict rather than
+ * each implementing the thresholds.
+ */
+export function codAvailability(
+  subtotalAfterDiscount: number,
+  rules: PricingRules = defaultPricingRules,
+): { available: boolean; reason?: string } {
+  if (!rules.codEnabled) {
+    return { available: false, reason: "Cash on delivery is not available." };
+  }
+
+  const money = (minor: number) =>
+    (minor / 100).toLocaleString(rules.locale, {
+      style: "currency",
+      currency: rules.currency,
+      maximumFractionDigits: 0,
+    });
+
+  if (rules.codMinOrder > 0 && subtotalAfterDiscount < rules.codMinOrder) {
+    return {
+      available: false,
+      reason: `Cash on delivery needs an order of ${money(rules.codMinOrder)} or more.`,
+    };
+  }
+
+  // Zero means no ceiling. A cap exists because the cost of a refused COD
+  // parcel scales with its value.
+  if (rules.codMaxOrder > 0 && subtotalAfterDiscount > rules.codMaxOrder) {
+    return {
+      available: false,
+      reason: `Cash on delivery is not available above ${money(rules.codMaxOrder)}.`,
+    };
+  }
+
+  return { available: true };
 }
 
 /** Stable identity for a variant in the cart. */

@@ -43,9 +43,10 @@ admin panel writing to data the storefront ignores is decoration.
 
 - Cart drawer and full cart page, with a per-line quantity ceiling
 - Promotion codes with minimum-spend rules, free-shipping progress meter
-- Four-step checkout — details, shipping, payment, review — validated per step
-  with editable summaries
-- Order confirmation, order history with tracking, address book with add/edit/delete
+- Single-step checkout — contact and delivery, validated on submit — handing off to
+  Cashfree's hosted checkout (card, UPI, netbanking) for payment
+- Order confirmation that reconciles a pending payment live, order history with
+  tracking, address book with add/edit/delete
 - Saved items: drawer plus a full page with inline size selection and add-to-bag
 
 **Administer** — `/admin`
@@ -107,7 +108,7 @@ if a laptop goes missing. The app refuses to start in production without one.
 
 All outbound email has one server-only path: `src/server/email/transport.ts` posts both
 HTML and plain-text bodies to Resend, while `src/server/email/dispatch.ts` renders and
-logs the outcome in Postgres. It covers:
+logs the outcome to the `email_log` table in Supabase Postgres. It covers:
 
 - order confirmation;
 - shipped/out-for-delivery, delivered and cancelled status messages;
@@ -203,88 +204,59 @@ visitor is bounced immediately, but it is a convenience, not the boundary.
 
 ### Hosting: read this before deploying
 
-Two supported shapes, and which one you are on is decided entirely by whether the host
-gives you a writable disk.
+Everything — products, taxonomy, banners, settings, customers, OTP records, orders
+and lines, reviews, audit entries, email templates/logs — lives in Supabase Postgres.
+Uploaded images live in a Supabase Storage bucket, served from its CDN. There is no
+disk state and no writable-filesystem requirement, so the app runs the same way on a
+VPS, a container, or a fully serverless host like Vercel or Netlify.
 
-**A host with a persistent disk** — a VPS, a container, Render, Railway, Fly. The store
-is a single JSON document at `data/store.json`, written atomically via
-temp-file-and-rename, and uploaded images sit beside it in `data/uploads/`. Nothing else
-is needed. `data/store.json` is gitignored: it holds the live catalogue, orders, customer
-addresses and hashed credentials, so do not commit it, and do arrange a backup that is
-not on the same machine.
+Before first run, apply the SQL in `supabase/migrations/` to your Supabase project
+(see `supabase/README.md` for the exact steps — this repo never runs migrations for
+you) and create a public Storage bucket matching `SUPABASE_STORAGE_BUCKET`. Then set:
 
-**Netlify, Vercel, or anything else serverless.** The filesystem there is read-only and
-per-invocation, so both the store and the uploads need somewhere else to live. Set the
-variables in `.env.example` and the app switches:
-
-| Concern | Disk host | Serverless host |
-| --- | --- | --- |
-| Store | `data/store.json` | Postgres — see the migration status below |
-| Images | `data/uploads/` | Supabase Storage, served from its CDN |
-| Login rate limit | in-process counter | `login_attempts` table |
-| Maintenance flag | in-memory store cache | 10-second TTL cache |
-
-Uploads and rate limiting refuse to fall back silently. `storageDriver()` throws at
-startup if it detects Netlify or Vercel with no bucket configured, because the
-alternative is discovering a week later that every image a merchant uploaded is gone.
-
-#### Database status
-
-The Postgres migration is complete. When `DATABASE_URL`/`DIRECT_URL` are configured,
-products, taxonomy, banners, settings, customers, OTP records, orders and lines, reviews,
-audit entries, email templates/logs and login throttling all use Postgres. The JSON store
-remains only as a no-database local/test fallback.
-
-| Piece | State |
-| --- | --- |
-| `src/server/db/schema.ts` — 20 tables with indexes, constraints and child relations | done |
-| `drizzle/` migration SQL and `supabase-fresh-schema.sql` | done |
-| `src/server/db/client.ts` — direct locally, transaction pooler in production | done |
-| `src/server/db/mappers.ts` — row ↔ domain, round-trip tested | done |
-| `scripts/seed-database.ts` — `npm run db:seed` | done |
-| All repository reads and writes through Drizzle | done |
-| Supabase Storage for uploaded images | done |
-| Persisted login/contact throttling | done |
-| Transactional email log and editable templates | done |
-
-#### First run against Postgres
-
-```bash
-npm run db:migrate   # create the tables
-npm run db:seed      # catalogue, taxonomy, banners, settings
-                     # then open /admin/setup to create the first owner
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_STORAGE_BUCKET=...
 ```
 
-`db:seed` is idempotent — re-running tops up what is missing and leaves merchant edits
-alone. `--reset` clears first (never staff accounts); `--demo` also inserts the sample
-orders, which are off by default because they are fabricated revenue in a real
-merchant's reporting.
+`SUPABASE_SERVICE_ROLE_KEY` is server-only and bypasses row-level security — never
+prefix it `NEXT_PUBLIC_` and never ship it to the browser. The service role is what
+every repository and `storage.ts` use; nothing in the app currently authenticates to
+Supabase as an end user.
 
-Supabase pauses a free project after a week of inactivity;
-`.github/workflows/keep-database-awake.yml` pings `/shop` every three days to prevent it.
-Note that GitHub disables scheduled workflows after 60 days with no commits to the repo.
+| Concern | Where it lives |
+| --- | --- |
+| Products, orders, customers, everything else | Supabase Postgres, via `src/server/repositories/` |
+| Images | Supabase Storage, served from its CDN |
+| Login rate limit | in-process counter (deliberately not a database table — see below) |
+| Maintenance flag | 10-second TTL cache over the `settings` row |
+
+Login throttling stays in-process rather than in Postgres on purpose: it is a soft
+speed bump documented as such, not a security boundary, and a database write per
+failed keystroke on the login form is worse than the alternative of eventually
+reaching for Redis/Upstash if real distributed limiting is ever needed.
 
 ---
 
 ## Architecture
 
-### One store, two front doors
+### One database, two front doors
 
 ```
-                     ┌─ lib/catalog.ts ──→ storefront pages  (active products only)
-server/store.ts  ──→ │
-  (JSON document)    └─ server/repositories/ ──→ admin pages + server actions
-                                                  (everything, including drafts)
+                          ┌─ lib/catalog.ts ──────→ storefront pages  (active products only)
+Supabase Postgres  ──────→│
+  (src/server/supabase.ts)└─ server/repositories/ → admin pages + server actions
+                                                     (everything, including drafts)
 ```
-
-`lib/config.ts` and `lib/data/products.ts` are the **seed**, not the source of truth.
-On first read the store writes itself from them; after that the document is
-authoritative and both `config.ts` and the seed catalogue are only consulted again if
-the file is deleted.
 
 `lib/catalog.ts` is the storefront's read layer and every function in it is async.
 It returns `active` products exclusively — drafts and archived items are invisible
 there by construction, not by a filter each caller has to remember.
+
+Every table lives behind `src/server/supabase.ts`, the single module that imports
+`@supabase/supabase-js`. No page or component talks to Supabase directly.
 
 ### Data narrows at the client boundary
 
@@ -332,9 +304,12 @@ only way "editable in admin" stays true rather than half-true.
 ### Checkout is the trust boundary
 
 The browser sends what the shopper wants — product id, colourway, size, quantity —
-and nothing about what it costs. `placeOrder` (`app/checkout/actions.ts`) looks up
-the prices, recomputes discount, shipping and tax from live settings, and writes the
-order. Whatever the client believed about the total is ignored.
+and nothing about what it costs. `placeOrder` (`app/actions/checkout.ts`) looks up
+the prices, recomputes discount, shipping and tax from live settings, opens a
+Cashfree payment session against that recomputed total, and writes the order as
+`pending`. Whatever the client believed about the total is ignored — it is also the
+figure Cashfree is told to collect, so a tampered request cannot buy a coat for a
+rupee either on this app's own record or on the amount actually charged.
 
 There is no inventory, so nothing is reserved: every size is always purchasable and the
 same piece can be ordered any number of times, because fulfilment is manual. A test
@@ -347,7 +322,41 @@ argument: the cart omits it and gets the seeded values from `config.ts`, which k
 the drawer instant with no round trip; the server passes rules read from the store.
 One implementation, so the quote and the charge cannot drift apart.
 
-There is still no payment provider — see [Not wired up](#not-wired-up).
+### Payment: Cashfree
+
+`placeOrder` records the order and opens a Cashfree order/payment session in the same
+call, but never takes money itself — the shopper is redirected to Cashfree's own
+hosted checkout (card, UPI, netbanking) immediately after, and the order sits
+`paymentStatus: "pending"` until that resolves. Card details never reach this
+codebase, so there is no PCI SAQ-D scope to carry.
+
+```env
+CASHFREE_ENVIRONMENT=sandbox            # "production" once you are live
+CASHFREE_APP_ID=
+CASHFREE_SECRET_KEY=
+CASHFREE_WEBHOOK_SECRET=
+```
+
+Get the App ID and Secret Key from the Cashfree Merchant Dashboard → Developers →
+API Keys, and point a webhook at `/api/payments/cashfree/webhook` under Developers →
+Webhooks, subscribed to Payment Success, Payment Failed, Payment User Dropped and
+**Refund Status** (so a refund that fails days later is noticed; without it, the admin
+page's "Check status" button still works).
+`CASHFREE_WEBHOOK_SECRET` is the same Secret Key by default — see the comment in
+`.env.example` for why it is its own variable.
+
+The webhook (`src/app/api/payments/cashfree/webhook/route.ts`) is what actually marks
+an order `paid` — verified against Cashfree's HMAC signature over the raw request body,
+then reconciled by fetching the order straight from Cashfree's API rather than trusting
+fields embedded in the webhook payload. The confirmation page also reconciles on its
+own if the shopper lands back before the webhook does, so a slow or dropped delivery
+never leaves someone staring at a stuck page. Only once an order is `paid` does the
+confirmation email go out and the cart get cleared.
+
+Without Cashfree configured, `placeOrder` refuses every request outright with "Payment
+is not available right now" rather than recording an order that could never be paid
+for — there is no degraded "log it locally" mode here the way there is for email or SMS,
+because there is no honest way to log a payment.
 
 ### Guests hold a claim ticket, not their orders
 
@@ -490,29 +499,55 @@ honestly, including known gaps.
 ## Testing
 
 ```bash
-npm test          # 244 unit tests
+npm test          # unit tests — no network, no database, runs everywhere
 npm run check     # typecheck → lint → test → build → bundle guard
 npm start         # then, in another shell:
-npm run smoke        # 79 HTTP checks against the running server
-npm run check:admin  # 43 checks that admin stays separate and locked down
+npm run smoke        # HTTP checks against the running server
+npm run check:admin  # checks that admin stays separate and locked down
 ```
 
-Tests point `PRESTINE_STORE_PATH` at a scratch file per suite, so a run never touches
-`data/store.json`. Coverage is aimed at logic where bugs are expensive:
+Two kinds of test live side by side under `src/**/__tests__/`, and `npm test` runs
+both — the split is in what each one needs, not in how you invoke them.
+
+**Unit tests** are pure logic: no network, no environment variable, no database.
+These run in CI and on every machine with no setup.
 
 | Suite | What it protects |
 |---|---|
-| `place-order.test.ts` | Prices come from the store not the request; live tax rate and free-shipping threshold; unknown promo codes ignored rather than recorded; concurrent orders for the same piece all succeed (there is no inventory, and this test fails loudly if any is reintroduced); drafts cannot be bought; fractional quantities rejected; only four card digits stored, normalised |
-| `repositories.test.ts` | Drafts stay off the storefront; slugs never collide; `updatedAt` moves on edit; duplicates start unrated; forward-only order transitions; renaming a category rewrites its products; in-use categories cannot be deleted; promo validation; partial settings updates preserve nested keys |
-| `mappers.test.ts` | Every seeded product and demo order survives a round trip through database rows unchanged; colourway, size and line order is restored from `position` rather than trusted from the query; an empty image list normalises to absent, because `[]` is truthy and would render an empty gallery; write mappers name every column rather than leaning on a default |
 | `login-throttle.test.ts` | The sliding window locks on the fifth failure and frees itself as failures age out; the decisive attempt is the fifth-newest, so an expiring outlier cannot report an unlock that has not happened; retries during a lockout keep it alive |
 | `login-attempts.test.ts` | Attempts accumulate per key, so one attacker cannot lock out another admin by guessing their address; a success clears the history; keys are case-insensitive |
 | `ttl-cache.test.ts` | Concurrent callers share one load rather than stampeding a cold instance; a failed load is not cached; a late failure cannot evict the value that replaced it |
 | `auth.test.ts` | Passwords are unrecoverable and per-user salted; tampered payloads and signatures rejected; expired sessions refused; role permissions hold |
 | `cart-math.test.ts` | Totals reconcile; promo minimums; discounts never exceed subtotal; all money stays integral |
-| `catalog.test.ts` | Catalogue integrity (unique slugs, valid references, no broken cross-sells, sale tags match prices); only active products exposed; filter AND/OR semantics; sort stability; search behaviour; facet counts; summaries drop server-only fields |
 | `validation.test.ts` | Luhn checks, expiry in the past, input masks, brand detection |
 | `search-params.test.ts` | Unknown values dropped rather than emptying results; pagination resets on filter change; round-trip through parse and build |
+| `email.test.ts` | HTML-escaping in rendered order emails; token substitution never drops a block silently |
+| `banners.test.ts` (lib) | Slide state and carousel transition logic |
+
+**Integration tests** exercise the repository layer against a real Postgres
+database and, for uploads, a real Supabase Storage bucket — the things a mock
+query builder cannot faithfully stand in for: unique constraints, cascading
+deletes, and the transaction semantics inside the `security definer` RPCs in
+`supabase/migrations/00000000000003_functions.sql`. Each one calls
+`checkSupabaseDatabase()`/`checkSupabaseStorage()`
+(`src/server/__tests__/supabase-test-helpers.ts`) and reports as **skipped, with
+a clear reason** — not a failure — when `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`
+(and `SUPABASE_STORAGE_BUCKET` for uploads) are not set, which is why `npm test`
+exits cleanly with no Supabase project configured at all.
+
+| Suite | What it protects |
+|---|---|
+| `place-order.test.ts` | Prices come from the store not the request; live tax rate and free-shipping threshold; unknown promo codes ignored rather than recorded; concurrent orders for the same piece all succeed (there is no inventory, and this test fails loudly if any is reintroduced); drafts cannot be bought; fractional quantities rejected; only four card digits stored, normalised |
+| `repositories.test.ts` | Drafts stay off the storefront; slugs never collide; `updatedAt` moves on edit; duplicates start unrated; forward-only order transitions; renaming a category rewrites its products; in-use categories cannot be deleted; promo validation; partial settings updates preserve nested keys |
+| `email-queue.test.ts` | Review requests fire once per order, only after the configured delay, only for delivered orders with an email on file; templates round-trip through an edit and a restore without losing the enabled/disabled switch |
+| `reviews.test.ts` | A review can only be written for a delivered order the account actually placed; one review per account per product, enforced by the database, not just by application code; a reason never offered for a rating is rejected |
+| `customers.test.ts` | Signup and password reset via a hashed one-time code; a code cannot be replayed; phone numbers are matched however they were typed |
+| `uploads.test.ts` | Magic-byte sniffing (SVG refused, declared type ignored) runs everywhere as a unit test; the actual upload to Supabase Storage and reading the bytes back is the integration half |
+| `catalog.test.ts` | Catalogue integrity on a small fixture set built by the test itself (there is no seeded demo catalogue) — unique slugs, valid references, no broken cross-sells, sale tags match prices; only active products exposed; filter AND/OR semantics; sort stability; search behaviour; facet counts; summaries drop server-only fields |
+
+Run the integration half for real by pointing `.env.local` at a **disposable
+test** Supabase project (never production — these tests create and delete real
+rows) with the migrations in `supabase/migrations/` already applied.
 
 `scripts/smoke.mjs` covers what unit tests can't: every route returns 200, unknown
 slugs return a real **404** (not a soft one), filters actually narrow the result set,
@@ -534,13 +569,29 @@ now a comment in `not-found.tsx` explaining why that file must not come back.
 
 Deliberate, and visible in the UI rather than hidden:
 
-- **Payments.** Orders are real — priced and validated on the server — but no money
-  moves. The card is validated in the browser, only the last four digits reach the
-  server, and nothing is captured. There is a notice on the payment step.
-  To go live: authorise in `app/actions/checkout.ts` **after** the server has recomputed
-  the total and **before** `createOrder`, so a declined card never leaves an order
-  behind. Use a provider's hosted fields (Stripe, Razorpay) so card data never touches
-  this codebase and you stay out of PCI SAQ-D scope.
+- **Refunds.** A prepaid order is refunded from the admin order page (Refunds panel, or
+  the Return panel once the items are back), through Cashfree's Refunds API to whatever
+  the customer paid with. The amount is staff's to set, up to what was paid, so a
+  deduction is simply a smaller refund. Every refund is recorded in `order_refunds`
+  (migration 20), and the limit is enforced in the database under a lock. Refunds
+  made directly in the Cashfree dashboard are not tracked here. A cash-on-delivery
+  return has nothing to refund to, so the customer gives a UPI ID and staff pay it by
+  hand; that is the only case where a UPI ID is collected, and it is erased once the
+  return is closed. Anyone with `orders:write` can refund; split that out into its own
+  permission if the team grows.
+- **First-order discount.** A percentage off a customer's first order (Admin → Settings,
+  "First-order discount (%)", default 10, zero turns it off), applied automatically to a
+  signed-in customer and not combined with a promotion code: the larger of the two
+  applies. It is once per person, enforced in the database under a lock
+  (`supabase/migrations/00000000000021_first_order_discount.sql`), not in the page. "Same
+  person" means sharing any of: the account, the email (Gmail dots and `+tags` ignored),
+  or a phone number (account or delivery). That will occasionally refuse a genuine new
+  customer who shares an email or number with someone who already ordered; it is the
+  cheaper mistake. Cancelling the order, a failed payment, or a prepaid order left unpaid
+  for 24 hours gives the discount back; anything else, including a return, keeps it
+  used. Customers who already have a paid or cash-on-delivery order are not first-time
+  customers. Any failure to check is treated as "no discount". A promotion code that is
+  reusable, like a "10% off your first order" one, defeats this and should be deleted.
 - **Marketing subscriptions.** There is deliberately no newsletter signup or bulk-send
   path. Resend is used only for transactional and direct client-care email; adding
   marketing mail also requires consent capture, unsubscribe handling and suppression
@@ -576,19 +627,17 @@ src/
 │   │   └── orders.ts         # customer-facing order lookup
 │   ├── api/
 │   │   ├── products/         # summaries by id or slug (client lookups)
-│   │   └── search/           # typeahead
+│   │   ├── search/           # typeahead
+│   │   └── payments/cashfree/webhook/  # marks an order paid; verifies HMAC signature
 │   ├── globals.css           # design tokens, base layer, component primitives
 │   └── robots.ts  sitemap.ts
 ├── server/                   # server-only. Never imported by a client component.
 │   ├── store.ts              # the JSON document: atomic writes, cache, seed
 │   ├── repositories/         # products, orders, taxonomy, settings, banners
-│   ├── db/
-│   │   ├── schema.ts         # 16 tables — the Postgres target
-│   │   ├── client.ts         # pooled connection, built on first use
-│   │   └── mappers.ts        # row ↔ domain, round-trip tested
+│   ├── cashfree.ts           # payment session creation, order fetch, webhook HMAC
 │   ├── storage.ts            # disk or Supabase Storage, chosen at runtime
 │   ├── uploads.ts            # sniffing, size cap, content-hash naming
-│   ├── login-attempts.ts     # rate limiting: table when there is a database
+│   ├── login-attempts.ts     # rate limiting: in-process counter
 │   ├── auth.ts  session.ts   # scrypt hashing, signed sessions, permissions
 │   ├── audit.ts  metrics.ts  # activity trail, dashboard aggregation
 ├── components/

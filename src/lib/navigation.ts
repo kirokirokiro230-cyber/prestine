@@ -1,4 +1,5 @@
-import type { Category, Collection, StoreSettings } from "./types";
+import { POLICY_ORDER, policies } from "./policies";
+import type { Category, Collection } from "./types";
 
 /**
  * Navigation is derived from live data, not a hard-coded list.
@@ -118,10 +119,7 @@ export function buildPrimaryNav(
   return items;
 }
 
-export function buildFooterNav(
-  collections: Collection[],
-  settings: Pick<StoreSettings, "returnWindowDays">,
-): NavColumn[] {
+export function buildFooterNav(collections: Collection[]): NavColumn[] {
   return [
     {
       heading: "Shop",
@@ -137,10 +135,6 @@ export function buildFooterNav(
       heading: "Client care",
       links: [
         { label: "Contact us", href: "/contact" },
-        {
-          label: `${settings.returnWindowDays}-day returns`,
-          href: "/shipping-returns",
-        },
         { label: "Size guide", href: "/size-guide" },
         { label: "Track an order", href: "/account/orders" },
         { label: "FAQ", href: "/faq" },
@@ -151,17 +145,16 @@ export function buildFooterNav(
       links: [
         { label: "About us", href: "/about" },
         { label: "Our story", href: "/about#story" },
-        { label: "Repairs & care", href: "/faq#care" },
         { label: "Stores", href: "/about#stores" },
       ],
     },
     {
-      heading: "Legal",
-      links: [
-        { label: "Terms of sale", href: "/terms" },
-        { label: "Privacy policy", href: "/privacy" },
-        { label: "Accessibility", href: "/accessibility" },
-      ],
+      // The same list the sitemap uses, in the same order.
+      heading: "Policies",
+      links: POLICY_ORDER.map((key) => ({
+        label: policies[key].title,
+        href: policies[key].path,
+      })),
     },
   ];
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { summariesByIds, summariesBySlugs } from "@/lib/catalog";
 import type { ProductSummary } from "@/lib/types";
+import { LIMITS, consumeIpRateLimit, rateLimitMessage } from "@/server/rate-limit";
 
 /**
  * Product summaries by id or slug.
@@ -26,6 +27,16 @@ function parseList(value: string | null): string[] {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+
+  // Cheap per call, but trivially scriptable into a catalogue scrape. The
+  // allowance is high enough that normal browsing never notices it.
+  const limited = await consumeIpRateLimit("public-read", LIMITS.publicRead);
+  if (limited) {
+    return NextResponse.json(
+      { error: rateLimitMessage(limited) },
+      { status: 429, headers: { "Retry-After": String(limited.secondsRemaining) } },
+    );
+  }
 
   const ids = parseList(searchParams.get("ids"));
   const slugs = parseList(searchParams.get("slugs"));

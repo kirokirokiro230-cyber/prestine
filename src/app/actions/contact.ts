@@ -1,9 +1,9 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { headers } from "next/headers";
 import { isContactTopic } from "@/lib/contact";
 import { email as validateEmail } from "@/lib/validation";
+import { clientIp } from "@/server/client-ip";
 import { dispatchContactEmail } from "@/server/email/dispatch";
 import { loginLockout, recordFailedLogin } from "@/server/login-attempts";
 
@@ -13,14 +13,7 @@ export interface ContactActionState {
   fieldErrors?: Partial<Record<"name" | "email" | "topic" | "orderRef" | "message", string>>;
 }
 
-async function clientIp(): Promise<string> {
-  const list = await headers();
-  return (
-    list.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    list.get("x-real-ip")?.trim() ||
-    "local"
-  );
-}
+
 
 /**
  * Deliver one public client-care enquiry.
@@ -71,7 +64,7 @@ export async function sendContactMessageAction(
 
   const ip = await clientIp();
   const rateKeys = [`contact:ip:${ip}`, `contact:email:${email}`];
-  const lockouts = await Promise.all(rateKeys.map(loginLockout));
+  const lockouts = await Promise.all(rateKeys.map((key) => loginLockout(key)));
   if (lockouts.some((entry) => entry.locked)) {
     return {
       ok: false,
@@ -81,7 +74,8 @@ export async function sendContactMessageAction(
 
   // Count a valid attempt before calling the provider so a failing provider cannot be
   // hammered without consuming the allowance. The limiter is shared across instances in
-  // Postgres and prunes itself; see `server/login-attempts.ts`.
+  // Postgres and prunes itself; see `server/login-attempts.ts`, which now holds the
+  // timestamps in `rate_limit_hits` rather than process memory.
   await Promise.all(rateKeys.map(recordFailedLogin));
 
   try {

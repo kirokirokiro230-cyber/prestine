@@ -3,12 +3,13 @@
 import { revalidatePath } from "next/cache";
 import type { Order } from "@/lib/types";
 import { recordAudit } from "@/server/audit";
+import { cashfreeConfig } from "@/server/cashfree";
 import { afterResponse } from "@/server/email/after-response";
+import { closePaymentIfOpen } from "@/server/payment-settlement";
 import { dispatchStatusEmail } from "@/server/email/dispatch";
 import {
   addOrderNote,
   getOrder,
-  setTracking,
   updateOrderStatus,
 } from "@/server/repositories/orders";
 import { PermissionError, requirePermission } from "@/server/session";
@@ -40,18 +41,36 @@ export async function updateOrderStatusAction(
 
     const id = String(formData.get("id") ?? "");
     const status = String(formData.get("status") ?? "") as Order["status"];
-    const carrier = String(formData.get("carrier") ?? "").trim();
-    const trackingNumber = String(formData.get("trackingNumber") ?? "").trim();
     const reason = String(formData.get("reason") ?? "").trim();
 
     const before = await getOrder(id);
     if (!before) return { error: "That order no longer exists." };
 
-    // Shipping without a tracking number leaves the customer with no way to
-    // follow the parcel, which generates the support email this avoids.
-    if (status === "shipped" && !trackingNumber) {
-      return { error: "Add a tracking number before marking an order as shipped." };
+    /*
+     * An unpaid prepaid order must not be marked shipped or delivered. Payment is
+     * confirmed only by Cashfree, and until it is the goods have not been paid for —
+     * marking one shipped emails the customer "on its way" for something they could
+     * still abandon at the payment page. COD is exempt, since cash comes on delivery.
+     * Cancelling is always allowed.
+     */
+    if (
+      (status === "shipped" || status === "delivered") &&
+      before.paymentMethod !== "cod" &&
+      before.paymentStatus !== "paid"
+    ) {
+      return {
+        error:
+          "This order has not been paid for yet. Wait for the payment to be confirmed before shipping it.",
+      };
     }
+
+    /*
+     * There is no "add a tracking number first" gate any more. The waybill is
+     * assigned by Delhivery at manifestation and copied onto the order by
+     * `create_shipment`, so there is nothing for staff to type — and demanding
+     * it here would block a correction on an order whose shipment failed to
+     * manifest.
+     */
 
     /*
      * A cancellation without a reason is the one status change that is genuinely
@@ -62,11 +81,10 @@ export async function updateOrderStatusAction(
       return { error: "Give a reason for cancelling — the customer will see it." };
     }
 
-    const updated = await updateOrderStatus(id, status, {
-      carrier,
-      trackingNumber,
-      reason,
-    });
+    const updated = await updateOrderStatus(id, status, { reason });
+
+    // A cancelled order must not stay payable at Cashfree. See `closePaymentIfOpen`.
+    if (status === "cancelled") await closePaymentIfOpen(cashfreeConfig(), before);
 
     await recordAudit({
       actorId: admin.id,
@@ -101,35 +119,6 @@ export async function updateOrderStatusAction(
         ? `Order marked as ${status}. The customer has been emailed.`
         : `Order marked as ${status}. No email sent.`,
     };
-  } catch (error) {
-    if (error instanceof PermissionError) return { error: error.message };
-    return { error: (error as Error).message };
-  }
-}
-
-export async function setTrackingAction(
-  _previous: OrderActionState,
-  formData: FormData,
-): Promise<OrderActionState> {
-  try {
-    const admin = await requirePermission("orders:write");
-
-    const id = String(formData.get("id") ?? "");
-    const carrier = String(formData.get("carrier") ?? "").trim();
-    const trackingNumber = String(formData.get("trackingNumber") ?? "").trim();
-
-    await setTracking(id, carrier, trackingNumber);
-    await recordAudit({
-      actorId: admin.id,
-      actorEmail: admin.email,
-      action: "update",
-      entity: "order",
-      entityId: id,
-      summary: `Updated tracking on ${id} (${carrier} ${trackingNumber})`,
-    });
-
-    revalidateOrder(id);
-    return { success: "Tracking saved." };
   } catch (error) {
     if (error instanceof PermissionError) return { error: error.message };
     return { error: (error as Error).message };

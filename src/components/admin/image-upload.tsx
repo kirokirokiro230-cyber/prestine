@@ -232,7 +232,7 @@ function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
 
   return (
-    <p role="alert" className="text-xs text-danger-500">
+    <p role="alert" className="text-xs text-danger-500 dark:text-danger-100">
       {message}
     </p>
   );

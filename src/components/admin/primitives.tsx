@@ -74,7 +74,7 @@ export function FormFeedback({
     <p
       role={error ? "alert" : "status"}
       className={cn(
-        "border px-3 py-2.5 text-sm",
+        "rounded-xl border px-4 py-3 text-sm shadow-xs",
         error
           ? "border-danger-500/40 bg-danger-100/60 text-danger-700 dark:bg-danger-700/20 dark:text-danger-100"
           : "border-success-500/40 bg-success-100/60 text-success-700 dark:bg-success-700/20 dark:text-success-100",
@@ -109,7 +109,7 @@ export function StatCard({
       <p className="text-2xs font-medium uppercase tracking-[0.12em] text-content-muted">
         {label}
       </p>
-      <p data-numeric className="mt-3 font-display text-3xl leading-none">
+      <p data-numeric className="mt-3 font-sans text-3xl font-bold leading-none tracking-[-0.04em]">
         {value}
       </p>
 
@@ -145,14 +145,14 @@ export function StatCard({
     return (
       <a
         href={href}
-        className="block border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        className="group block rounded-2xl border border-line bg-surface p-5 shadow-xs transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-line-strong hover:shadow-md"
       >
         {body}
       </a>
     );
   }
 
-  return <div className="border border-line bg-surface p-5">{body}</div>;
+  return <div className="rounded-2xl border border-line bg-surface p-5 shadow-xs">{body}</div>;
 }
 
 /** Section heading inside an admin page. */
@@ -172,7 +172,7 @@ export function Panel({
   bodyClassName?: string;
 }) {
   return (
-    <section className={cn("border border-line bg-surface", className)}>
+    <section className={cn("overflow-hidden rounded-2xl border border-line bg-surface shadow-xs", className)}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
         <div className="min-w-0">
           <h2 className="font-sans text-sm font-medium">{title}</h2>
@@ -208,11 +208,12 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap px-2 py-1 text-2xs font-medium uppercase tracking-[0.08em] leading-none",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[0.625rem] font-bold uppercase tracking-[0.08em] leading-none",
         tone[status] ?? "bg-surface-sunken text-content-muted",
         className,
       )}
     >
+      <span aria-hidden className="size-1.5 rounded-full bg-current opacity-60" />
       {status}
     </span>
   );

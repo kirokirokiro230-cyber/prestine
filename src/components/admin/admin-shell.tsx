@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowSquareOut,
+  Camera,
   ChartLine,
   ClipboardText,
   Envelope,
   Gear,
+  Images,
   List,
   Package,
   Percent,
@@ -19,30 +21,20 @@ import {
   Storefront,
   Tag,
   UsersThree,
-  X,
 } from "@phosphor-icons/react";
-import { Images } from "@phosphor-icons/react";
+import { signOut } from "@/app/admin/actions/auth";
+import { AdminNotifications } from "@/components/admin/notifications";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Drawer } from "@/components/ui/drawer";
 import { useResetOnChange } from "@/hooks/use-store";
 import type { AdminRole, Permission } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { signOut } from "@/app/admin/actions/auth";
-
-/**
- * Admin chrome: persistent sidebar on desktop, slide-over on mobile.
- *
- * Navigation is filtered by the signed-in role, so a staff account never sees a
- * link it cannot use. That is presentation only — every route and action re-checks
- * the permission on the server.
- */
 
 interface NavEntry {
   href: string;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  /** Omit to show the link to everyone signed in. */
+  icon: ComponentType<{ size?: number; className?: string }>;
   permission?: Permission;
-  /** Count badge, e.g. orders awaiting fulfilment. */
   badge?: number;
 }
 
@@ -51,20 +43,19 @@ interface NavSection {
   entries: NavEntry[];
 }
 
+/** Professional operational shell with role-aware desktop and mobile navigation. */
 export function AdminShell({
   children,
   admin,
   pendingOrders,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   admin: { name: string; email: string; role: AdminRole };
   pendingOrders: number;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Close the mobile drawer on navigation, during render so it is never briefly
-  // open on the new page.
   useResetOnChange(pathname, () => setMobileOpen(false));
 
   const sections: NavSection[] = [
@@ -80,6 +71,7 @@ export function AdminShell({
       entries: [
         { href: "/admin/products", label: "Products", icon: Package, permission: "products:write" },
         { href: "/admin/banners", label: "Banners", icon: Images, permission: "products:write" },
+        { href: "/admin/styling", label: "Style hints", icon: Camera, permission: "products:write" },
         { href: "/admin/categories", label: "Categories", icon: Tag, permission: "products:write" },
         { href: "/admin/collections", label: "Collections", icon: Storefront, permission: "products:write" },
         { href: "/admin/reviews", label: "Reviews", icon: Star, permission: "products:write" },
@@ -107,49 +99,55 @@ export function AdminShell({
   const allowed = (entry: NavEntry) =>
     !entry.permission || rolePermits(admin.role, entry.permission);
 
+  const isActive = (entry: NavEntry) =>
+    entry.href === "/admin"
+      ? pathname === "/admin"
+      : pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+
+  const currentEntry = sections
+    .flatMap((section) => section.entries)
+    .filter(allowed)
+    .find(isActive);
+
   const nav = (
-    <nav aria-label="Admin" className="flex flex-1 flex-col gap-7 overflow-y-auto p-4 scrollbar-thin">
+    <nav aria-label="Admin" className="flex flex-col gap-6 px-3 py-4 scrollbar-thin">
       {sections.map((section) => {
         const entries = section.entries.filter(allowed);
         if (entries.length === 0) return null;
 
         return (
           <div key={section.heading}>
-            <p className="mb-2 px-2 text-2xs font-medium uppercase tracking-[0.14em] text-content-subtle">
+            <p className="mb-2 px-3 text-[0.625rem] font-bold uppercase tracking-[0.16em] text-content-subtle">
               {section.heading}
             </p>
-            <ul className="flex flex-col gap-0.5">
+            <ul className="flex flex-col gap-1">
               {entries.map((entry) => {
-                // Exact match for the dashboard, prefix match elsewhere, so
-                // /admin/products/new still highlights Products.
-                const active =
-                  entry.href === "/admin"
-                    ? pathname === "/admin"
-                    : pathname === entry.href || pathname.startsWith(`${entry.href}/`);
-
+                const active = isActive(entry);
                 return (
                   <li key={entry.href}>
                     <Link
                       href={entry.href}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex min-h-10 items-center gap-2.5 rounded-xs px-2.5 text-sm transition-colors",
+                        "group flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-[background-color,color,box-shadow]",
                         active
-                          ? "bg-inverse text-on-inverse"
+                          ? "bg-accent-soft text-accent shadow-xs"
                           : "text-content-muted hover:bg-surface-sunken hover:text-content",
                       )}
                     >
-                      <entry.icon size={16} className="shrink-0" />
+                      <span
+                        className={cn(
+                          "grid size-7 shrink-0 place-items-center rounded-lg transition-colors",
+                          active ? "bg-accent text-on-accent" : "bg-surface-sunken group-hover:bg-surface",
+                        )}
+                      >
+                        <entry.icon size={15} aria-hidden />
+                      </span>
                       <span className="flex-1 truncate">{entry.label}</span>
                       {entry.badge ? (
                         <span
                           data-numeric
-                          className={cn(
-                            "min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-medium leading-4",
-                            active
-                              ? "bg-on-inverse/20 text-on-inverse"
-                              : "bg-accent text-on-accent",
-                          )}
+                          className="min-w-5 rounded-full bg-accent px-1.5 py-0.5 text-center text-[10px] font-bold leading-4 text-on-accent"
                         >
                           {entry.badge}
                         </span>
@@ -166,116 +164,137 @@ export function AdminShell({
   );
 
   const footer = (
-    <div className="border-t border-line p-4">
-      <div className="mb-3 min-w-0">
-        <p className="truncate text-sm font-medium">{admin.name}</p>
-        <p className="truncate text-xs text-content-muted">{admin.email}</p>
-        <p className="mt-1 text-2xs uppercase tracking-[0.1em] text-content-subtle">
-          {admin.role}
-        </p>
+    <>
+      <div className="mb-3 flex items-center gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-bold uppercase text-accent">
+          {initials(admin.name)}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-content">{admin.name}</p>
+          <p className="truncate text-xs text-content-muted">{admin.email}</p>
+        </div>
       </div>
-
       <div className="flex items-center gap-1">
         <Link
           href="/"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex min-h-9 flex-1 items-center gap-2 rounded-xs px-2 text-xs text-content-muted transition-colors hover:bg-surface-sunken hover:text-content"
+          className="inline-flex min-h-9 flex-1 items-center gap-2 rounded-lg px-2 text-xs font-medium text-content-muted transition-colors hover:bg-surface-sunken hover:text-content"
         >
-          <ArrowSquareOut size={14} />
+          <ArrowSquareOut size={14} aria-hidden />
           View store
         </Link>
-
         <form action={signOut}>
           <button
             type="submit"
-            className="inline-flex min-h-9 items-center gap-2 rounded-xs px-2 text-xs text-content-muted transition-colors hover:bg-surface-sunken hover:text-danger-500"
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-content-muted transition-colors hover:bg-surface-sunken hover:text-danger-500"
           >
-            <SignOut size={14} />
+            <SignOut size={14} aria-hidden />
             Sign out
           </button>
         </form>
       </div>
-    </div>
+    </>
   );
 
   return (
-    <div className="flex min-h-dvh bg-canvas">
-      {/* Desktop sidebar */}
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-line bg-surface lg:flex">
-        <div className="border-b border-line px-4 py-4">
-          <Link
-            href="/admin"
-            className="font-display text-lg tracking-[0.24em] text-content transition-opacity hover:opacity-70"
-          >
-            <span className="-mr-[0.24em] pr-[0.24em]">PRESTINE</span>
+    <div className="admin-theme flex min-h-dvh bg-canvas text-content">
+      <a
+        href="#admin-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-100 focus:rounded-lg focus:bg-accent focus:px-4 focus:py-3 focus:text-xs focus:font-semibold focus:text-on-accent"
+      >
+        Skip to admin content
+      </a>
+
+      <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line bg-surface lg:flex">
+        <div className="flex h-17 items-center border-b border-line px-5">
+          <Link href="/admin" className="group flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-xl bg-accent text-sm font-bold text-on-accent shadow-sm">
+              P
+            </span>
+            <span>
+              <span className="block text-sm font-bold tracking-[0.16em] text-content">PRESTINE</span>
+              <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-content-subtle">
+                Commerce admin
+              </span>
+            </span>
           </Link>
-          <p className="mt-1 text-2xs uppercase tracking-[0.14em] text-content-subtle">
-            Admin
-          </p>
         </div>
-        {nav}
-        {footer}
+        <div className="min-h-0 flex-1 overflow-y-auto">{nav}</div>
+        <div className="border-t border-line bg-surface px-4 py-4">{footer}</div>
       </aside>
 
-      {/* Mobile drawer */}
-      {mobileOpen ? (
-        <div className="fixed inset-0 z-90 lg:hidden">
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={() => setMobileOpen(false)}
-            className="absolute inset-0 h-full w-full animate-fade-in cursor-default bg-overlay"
-          />
-          <div className="absolute inset-y-0 left-0 flex w-72 animate-slide-in-left flex-col bg-surface shadow-xl">
-            <div className="flex items-center justify-between border-b border-line px-4 py-4">
-              <span className="font-display text-lg tracking-[0.2em]">PRESTINE</span>
-              <button
-                type="button"
-                onClick={() => setMobileOpen(false)}
-                aria-label="Close menu"
-                className="grid size-9 place-items-center text-content-muted"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            {nav}
-            {footer}
-          </div>
-        </div>
-      ) : null}
+      <Drawer
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        side="left"
+        title="PRESTINE admin"
+        description="Commerce workspace"
+        widthClass="w-[19rem] max-w-[88vw]"
+        panelClassName="admin-theme"
+        footer={footer}
+      >
+        {nav}
+      </Drawer>
 
-      {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-50 flex items-center gap-3 border-b border-line bg-canvas/95 px-4 py-3 backdrop-blur-md lg:px-8">
+        <header className="sticky top-0 z-50 flex h-17 items-center gap-3 border-b border-line bg-surface/92 px-4 shadow-xs backdrop-blur-xl sm:px-6 lg:px-8">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
+            aria-label="Open admin menu"
             aria-expanded={mobileOpen}
-            className="-ml-2 grid size-10 place-items-center text-content lg:hidden"
+            className="-ml-2 grid size-10 place-items-center rounded-lg text-content transition-colors hover:bg-surface-sunken lg:hidden"
           >
-            <List size={20} />
+            <List size={20} aria-hidden />
           </button>
 
-          {/* Spacer, so the theme toggle stays pinned to the right. */}
-          <div className="min-w-0 flex-1" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-content-subtle">
+              Workspace
+            </p>
+            <p className="truncate text-sm font-semibold text-content">
+              {currentEntry?.label ?? "Admin"}
+            </p>
+          </div>
 
+          <Link
+            href="/"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="View storefront in a new tab"
+            className="hidden size-10 place-items-center rounded-full text-content-muted transition-colors hover:bg-surface-sunken hover:text-content sm:grid"
+          >
+            <ArrowSquareOut size={17} aria-hidden />
+          </Link>
+          <AdminNotifications />
           <ThemeToggle />
+          <span
+            aria-label={`Signed in as ${admin.name}, ${admin.role}`}
+            title={`${admin.name} · ${admin.role}`}
+            className="hidden size-9 place-items-center rounded-full bg-accent text-xs font-bold uppercase text-on-accent sm:grid"
+          >
+            {initials(admin.name)}
+          </span>
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        <main id="admin-content" className="admin-main min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mx-auto w-full max-w-[96rem]">{children}</div>
+        </main>
       </div>
     </div>
   );
 }
 
-/**
- * Client-side mirror of the server role table.
- *
- * Duplicated deliberately: importing the server module would pull the store into
- * the browser bundle. Presentation only — the server is authoritative.
- */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("");
+}
+
 function rolePermits(role: AdminRole, permission: Permission): boolean {
   const table: Record<AdminRole, Permission[]> = {
     owner: ["products:write", "orders:write", "discounts:write", "settings:write", "staff:write"],

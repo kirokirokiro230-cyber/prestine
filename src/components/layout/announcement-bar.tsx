@@ -36,7 +36,7 @@ export function AnnouncementBar({ messages }: { messages: string[] }) {
   if (dismissed || messages.length === 0) return null;
 
   return (
-    <div className="relative bg-inverse text-on-inverse">
+    <div className="relative border-y border-on-inverse/10 bg-inverse text-on-inverse">
       <div className="page-gutter mx-auto flex max-w-page items-center justify-center py-2.5">
         {/*
           `min-w-0` is what actually lets `truncate` work on the children: a flex item

@@ -27,7 +27,7 @@ export async function CategoryTiles() {
   ).filter((entry) => entry.items.length > 0);
 
   return (
-    <ul className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+    <ul className="grid grid-cols-2 gap-4 sm:gap-5 lg:grid-cols-4">
       {entries.map(({ category, items }, index) => {
         const lead = items[0];
         const featured = index < 2;
@@ -41,7 +41,7 @@ export async function CategoryTiles() {
           >
             <Link
               href={`/shop/${category.slug}`}
-              className="group relative block h-full overflow-hidden bg-surface-sunken"
+              className="group relative block h-full overflow-hidden rounded-[1.5rem] border border-line bg-surface-sunken shadow-sm transition-[box-shadow,transform] duration-500 hover:-translate-y-1 hover:shadow-lg"
             >
               <div
                 className={cn(
@@ -92,7 +92,7 @@ export async function CategoryTiles() {
                 {/* Legibility scrim — strong enough for text in both themes. */}
                 <div
                   aria-hidden
-                  className="absolute inset-0 bg-gradient-to-t from-ink-950/72 via-ink-950/12 to-transparent"
+                  className="absolute inset-0 bg-gradient-to-t from-ink-950/80 via-ink-950/10 to-transparent transition-colors duration-500 group-hover:from-ink-950/90"
                 />
               </div>
 

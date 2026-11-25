@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight, Check } from "@phosphor-icons/react/dist/ssr";
 import { GarmentArt } from "@/components/product/garment-art";
 import { Reveal } from "@/components/ui/reveal";
 import { getProductBySlug } from "@/lib/catalog";
@@ -18,11 +18,7 @@ interface EditorialSplitProps {
   className?: string;
 }
 
-/**
- * Alternating image/copy band used for the craft and materials stories. Reads as
- * editorial rather than marketing because the copy is specific — fabric weights,
- * mill locations, construction methods.
- */
+/** Alternating image/copy band used for the craft and materials stories. */
 export async function EditorialSplit({
   eyebrow,
   title,
@@ -39,12 +35,12 @@ export async function EditorialSplit({
     <section className={cn("page-gutter mx-auto max-w-page", className)}>
       <div
         className={cn(
-          "grid items-center gap-10 lg:grid-cols-2 lg:gap-16",
+          "grid items-stretch gap-5 lg:grid-cols-2",
           reverse && "lg:[&>*:first-child]:order-2",
         )}
       >
-        <Reveal className="relative overflow-hidden bg-surface-sunken">
-          <div className="relative aspect-4/3 lg:aspect-4/5">
+        <Reveal className="relative min-h-[24rem] overflow-hidden rounded-[1.75rem] border border-line bg-surface-sunken shadow-md sm:min-h-[34rem]">
+          <div className="absolute inset-0">
             {product ? (
               <GarmentArt
                 product={product}
@@ -52,28 +48,35 @@ export async function EditorialSplit({
                 colorName={product.colors[0].name}
                 view={1}
                 texture
+                className="transition-transform duration-1000 ease-out hover:scale-[1.025]"
               />
             ) : null}
           </div>
+          <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink-950/10 to-transparent" />
         </Reveal>
 
-        <Reveal delay={80}>
+        <Reveal
+          delay={80}
+          className="flex flex-col justify-center rounded-[1.75rem] border border-line bg-surface px-6 py-10 shadow-sm sm:px-10 sm:py-14 lg:px-14"
+        >
           <p className="eyebrow">{eyebrow}</p>
-          <h2 className="mt-4 text-3xl leading-[1.1] sm:text-4xl lg:text-[2.75rem]">{title}</h2>
+          <h2 className="mt-5 text-4xl leading-[1.02] sm:text-5xl lg:text-[3.4rem]">{title}</h2>
 
-          <div className="mt-6 flex flex-col gap-4">
+          <div className="mt-7 flex max-w-xl flex-col gap-4">
             {body.map((paragraph) => (
-              <p key={paragraph} className="text-sm leading-relaxed text-content-muted sm:text-base">
+              <p key={paragraph} className="text-sm leading-7 text-content-muted sm:text-base">
                 {paragraph}
               </p>
             ))}
           </div>
 
           {bullets ? (
-            <ul className="mt-8 grid gap-x-8 gap-y-3 border-t border-line pt-8 sm:grid-cols-2">
+            <ul className="mt-8 grid gap-x-8 gap-y-3.5 border-t border-line pt-7 sm:grid-cols-2">
               {bullets.map((bullet) => (
-                <li key={bullet} className="flex gap-3 text-sm text-content-muted">
-                  <span aria-hidden className="mt-2 size-1 shrink-0 rounded-full bg-accent" />
+                <li key={bullet} className="flex gap-3 text-sm leading-6 text-content-muted">
+                  <span aria-hidden className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
+                    <Check size={11} weight="bold" />
+                  </span>
                   {bullet}
                 </li>
               ))}
@@ -82,9 +85,9 @@ export async function EditorialSplit({
 
           <Link
             href={cta.href}
-            className="group mt-9 inline-flex items-center gap-2 text-2xs font-medium uppercase tracking-[0.14em] text-content"
+            className="group mt-9 inline-flex w-fit items-center gap-3 rounded-full bg-accent px-6 py-3.5 text-2xs font-semibold uppercase tracking-[0.14em] text-on-accent shadow-sm transition-[background-color,box-shadow] hover:bg-accent-hover hover:shadow-md"
           >
-            <span className="link-underline">{cta.label}</span>
+            <span>{cta.label}</span>
             <ArrowRight
               size={13}
               aria-hidden

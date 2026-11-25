@@ -14,7 +14,7 @@ export interface Crumb {
  */
 export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: string }) {
   return (
-    <nav aria-label="Breadcrumb" className={cn("text-xs", className)}>
+    <nav aria-label="Breadcrumb" className={cn("text-2xs font-medium uppercase tracking-[0.12em]", className)}>
       <ol className="flex flex-wrap items-center gap-1.5 text-content-muted">
         {items.map((item, index) => {
           const last = index === items.length - 1;

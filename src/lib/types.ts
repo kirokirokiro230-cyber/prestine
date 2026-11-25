@@ -305,11 +305,22 @@ export interface PromoCode {
   description: string;
 }
 
+/** How the shopper pays. */
+export type PaymentMethod = "prepaid" | "cod";
+
 export interface OrderSummary {
   subtotal: number;
   discount: number;
   shipping: number;
   tax: number;
+  /**
+   * Cash-on-delivery handling fee, in minor units. Zero on a prepaid order, and
+   * zero on a COD order when the merchant absorbs the courier's charge.
+   *
+   * Carried separately from `shipping` rather than folded into it so a refund,
+   * an invoice line and a margin report can each tell the two apart.
+   */
+  codFee: number;
   total: number;
 }
 
@@ -405,6 +416,18 @@ export interface Order {
   cardLast4?: string;
   trackingNumber?: string;
   carrier?: string;
+  /**
+   * The courier's own latest status wording, e.g. "In Transit", "Delivered".
+   *
+   * Distinct from `status`, which is this shop's fulfilment state machine. The
+   * courier's text is free-form and theirs to change, so it is shown as-is and
+   * never parsed for logic — `status` remains the field anything decides on.
+   *
+   * Written by the tracking sweep (`src/server/tracking-sync.ts`).
+   */
+  shippingStatus?: string;
+  /** Courier's estimated delivery date, when it has given one. */
+  expectedDeliveryDate?: string;
   shippedAt?: string;
   deliveredAt?: string;
   cancelledAt?: string;
@@ -428,6 +451,63 @@ export interface Order {
   reviewRequestedAt?: string;
   /** Internal notes, visible only in the admin panel. */
   notes?: OrderNote[];
+
+  /**
+   * Payment lifecycle, independent of `status` (which describes fulfilment).
+   *
+   * An order is written with `paymentStatus: "pending"` *before* the shopper ever
+   * reaches Cashfree's hosted checkout — see the trust-boundary note in
+   * `src/app/actions/checkout.ts`. It only ever moves to `"paid"` from the Cashfree
+   * webhook handler (or a server-side reconciliation fetch), never from anything the
+   * browser asserts. `"failed"` covers a declined or abandoned attempt; the order
+   * itself is not deleted so the shopper can retry payment against the same
+   * reference rather than starting over.
+   */
+  paymentStatus: "pending" | "paid" | "failed";
+  /**
+   * How the shopper chose to pay.
+   *
+   * Stored rather than inferred. The shipping layer needs it to decide whether
+   * Delhivery should collect cash at the door, and inferring that from
+   * `paymentStatus` would mean any order manifested before payment confirmed
+   * shipped as COD — asking the customer to pay twice.
+   *
+   * A COD order is `paymentStatus: "pending"` until the courier reports
+   * delivery, at which point the tracking sweep moves it to `"paid"`. So "paid"
+   * means the same thing for both methods: the money arrived.
+   */
+  paymentMethod: PaymentMethod;
+  /** COD handling fee charged on this order, in minor units. Zero when prepaid. */
+  codFee?: number;
+  /** `"cashfree"` for an online order, `"cod"` for cash on delivery. */
+  paymentProvider?: string;
+  /** Cashfree's own order id for this payment attempt. */
+  cashfreeOrderId?: string;
+  /**
+   * The `payment_session_id` used to (re)launch Cashfree's hosted checkout. Not
+   * secret, but not customer-facing either — only the checkout flow reads this.
+   */
+  cashfreePaymentSessionId?: string;
+  /** Cashfree's payment id for the transaction that actually paid the order. */
+  cashfreePaymentId?: string;
+  /** When the webhook (or reconciliation fetch) confirmed payment. */
+  paidAt?: string;
+
+  /**
+   * The customer's return for this order, if they have asked for one.
+   *
+   * Attached only by the customer-facing `lookupOrders`, never by the repository, and it is
+   * deliberately small: the status, and the MASKED refund destination. The full UPI ID is
+   * not on this type at all, so nothing that handles an `Order` can send it to a browser by
+   * accident.
+   */
+  returnRequest?: {
+    id: string;
+    status: import("./delhivery/types").ReturnStatus;
+    requestedAt: string;
+    /** e.g. `as••••@okaxis`. */
+    refundHint?: string;
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -483,9 +563,54 @@ export interface StoreSettings {
   freeShippingThreshold: number;
   /** Charged when below the threshold, in minor units. */
   standardShippingRate: number;
+  /**
+   * Whether cash on delivery is offered.
+   *
+   * Off by default. COD carries real costs the merchant should choose
+   * deliberately: Delhivery charges the greater of a flat fee or a percentage of
+   * the collected amount, and a refused parcel costs forward and return freight
+   * with no revenue against it. Availability is also checked per pincode against
+   * Delhivery's serviceability, which can say no even when this says yes.
+   */
+  codEnabled: boolean;
+  /**
+   * Handling fee added to a COD order, in minor units.
+   *
+   * Zero means the shop absorbs the courier's charge. Set it to recover the cost
+   * and COD becomes roughly cost-neutral against the payment-gateway fee a
+   * prepaid order pays instead.
+   */
+  codFee: number;
+  /** Minimum order value for COD, in minor units. Zero means no floor. */
+  codMinOrder: number;
+  /**
+   * Maximum order value for COD, in minor units. Zero means no ceiling.
+   *
+   * Worth setting: the cost of a refused COD parcel scales with its value, and
+   * so does the cash a courier is carrying on your behalf.
+   */
+  codMaxOrder: number;
+  /**
+   * Percentage off a customer's first order, 0–100, applied automatically and only once per
+   * person. Zero turns it off, and is also what a database that has not had migration 21
+   * reads as, so the discount is never on by accident.
+   */
+  firstOrderDiscountPercent: number;
   /** Fractional rate, e.g. 0.08 for 8%. */
   taxRate: number;
-  returnWindowDays: number;
+  /**
+   * How long after delivery a return may be raised, in hours.
+   *
+   * Hours rather than days because a 48-hour policy is not expressible in whole
+   * days without ambiguity — "2 days" leaves open whether a parcel delivered at
+   * 23:00 has until 23:00 two days later or until the end of that day, and the
+   * answer decides whether a real customer is refused.
+   *
+   * Enforced server-side in `createReturnRequest`, not merely quoted in copy.
+   * Render it for shoppers with `formatReturnWindow`, which says "48 hours" or
+   * "30 days" depending on the value.
+   */
+  returnWindowHours: number;
   /**
    * How long delivery takes, in business days.
    *
@@ -631,17 +756,6 @@ export interface CustomerAccount {
   /** Per-account random salt, hex encoded. */
   passwordSalt: string;
   /**
-   * The Supabase Auth identity this account is bridged to, once one exists.
-   *
-   * Populated on the first successful OTP verification after the Supabase Auth bridge
-   * landed — this app's own OTP flow still decides whether a code is correct, and a
-   * success then creates or finds the matching `auth.users` row and records its id here.
-   * Absent for accounts that predate the bridge and have not signed in since, which is
-   * why it is optional. `id` stays the stable key every order and review references, so
-   * this is purely the auth/session link.
-   */
-  authUserId?: string;
-  /**
    * When the signup code was confirmed.
    *
    * Always set, because an account is only written after the code is confirmed — there
@@ -695,20 +809,31 @@ export interface PhoneVerification {
    * Who is holding the code.
    *
    * `local` means this application generated it, so `codeHash`/`codeSalt`/`attempts`
-   * are what a guess is checked against. `twilio-verify` means a Verify Service did —
-   * the code, its expiry and its attempt cap all live on Twilio's side, and this row
-   * exists only to carry the pending signup payload between "a code was sent" and "the
-   * code was confirmed". A row can never be checked by the wrong path: `otp.ts` reads
-   * this field before it decides whether to compare a hash or call Twilio.
+   * are what a guess is checked against. `2factor` and `twilio-verify` mean a hosted
+   * provider did — the code, its expiry and its attempt cap all live on the
+   * provider's side, and this row exists only to carry the pending signup payload
+   * between "a code was sent" and "the code was confirmed" (plus, for `2factor`, the
+   * session id needed to check it — see `providerRef`). `twilio-verify` is kept only
+   * for reading any row already in flight from before this store switched providers;
+   * no new row is ever written with it. A row can never be checked by the wrong
+   * path: `otp.ts` reads this field before it decides whether to compare a hash or
+   * call a hosted provider.
    */
-  provider: "local" | "twilio-verify";
-  /** scrypt derived key of the six-digit code, hex encoded. Absent for `twilio-verify`. */
+  provider: "local" | "2factor" | "twilio-verify";
+  /** scrypt derived key of the six-digit code, hex encoded. Absent for a hosted provider. */
   codeHash?: string;
-  /** Absent for `twilio-verify`. */
+  /** Absent for a hosted provider. */
   codeSalt?: string;
+  /**
+   * The hosted provider's own reference for this code. For `2factor`, this is the
+   * session id from its AUTOGEN call — required to check a code with
+   * `SMS/VERIFY/{session_id}/{otp}`. Twilio Verify's check-code call needs only the
+   * phone number, so `twilio-verify` rows never set this; `local` rows never do either.
+   */
+  providerRef?: string;
   /** When the code stops being accepted. */
   expiresAt: string;
-  /** Wrong guesses so far. The code is burned once this reaches the cap. Twilio keeps its own count for `twilio-verify`; this stays 0. */
+  /** Wrong guesses so far. The code is burned once this reaches the cap. A hosted provider keeps its own count; this stays 0 for `2factor`/`twilio-verify`. */
   attempts: number;
   /** Also the resend cooldown's reference point. */
   createdAt: string;

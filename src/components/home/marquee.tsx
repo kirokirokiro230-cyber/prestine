@@ -18,7 +18,7 @@ export function Marquee({
   return (
     <div
       className={cn(
-        "group relative flex overflow-hidden border-y border-line bg-surface py-4",
+        "group relative flex overflow-hidden border-y border-accent/15 bg-accent-soft/70 py-4.5",
         className,
       )}
     >
@@ -32,10 +32,10 @@ export function Marquee({
             {items.map((item) => (
               <li
                 key={`${copy}-${item}`}
-                className="flex items-center gap-10 px-5 text-2xs uppercase tracking-[0.18em] text-content-muted"
+                className="flex items-center gap-10 px-5 text-2xs font-semibold uppercase tracking-[0.2em] text-accent"
               >
                 {item}
-                <span aria-hidden className="size-1 rounded-full bg-accent" />
+                <span aria-hidden className="size-1 rounded-full bg-accent/55" />
               </li>
             ))}
           </ul>

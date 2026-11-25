@@ -6,7 +6,7 @@ import { ProductGrid } from "@/components/product/product-grid";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ProductGridSkeleton } from "@/components/ui/skeleton";
+import { CartSkeleton, ProductGridSkeleton } from "@/components/ui/skeleton";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { pluralise } from "@/lib/format";
 import type { Product } from "@/lib/types";
@@ -25,22 +25,8 @@ export function CartView({ recommendations }: { recommendations: Product[] }) {
 
   if (!hydrated) {
     return (
-      <div className="page-gutter mx-auto max-w-page py-10">
-        <div className="h-9 w-48 animate-shimmer bg-surface-sunken" />
-        <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_22rem]">
-          <div className="flex flex-col gap-6">
-            {Array.from({ length: 2 }, (_, i) => (
-              <div key={i} className="flex gap-6">
-                <div className="aspect-3/4 w-32 animate-shimmer bg-surface-sunken" />
-                <div className="flex flex-1 flex-col gap-3 pt-2">
-                  <div className="h-4 w-2/3 animate-shimmer bg-surface-sunken" />
-                  <div className="h-3 w-1/3 animate-shimmer bg-surface-sunken" />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="h-64 animate-shimmer bg-surface-sunken" />
-        </div>
+      <div role="status" aria-label="Loading your bag">
+        <CartSkeleton />
       </div>
     );
   }
@@ -79,9 +65,10 @@ export function CartView({ recommendations }: { recommendations: Product[] }) {
     <div className="page-gutter mx-auto max-w-page py-10">
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Bag" }]} />
 
-      <header className="mt-6 flex flex-wrap items-end justify-between gap-4">
+      <header className="mt-8 flex flex-wrap items-end justify-between gap-4 border-l-2 border-accent pl-5 sm:pl-7">
         <div>
-          <h1 className="text-4xl leading-tight sm:text-5xl">Your bag</h1>
+          <p className="eyebrow mb-3">Your selection</p>
+          <h1 className="text-5xl leading-[0.98] sm:text-6xl">Your bag</h1>
           <p data-numeric className="mt-2 text-sm text-content-muted">
             {pluralise(count, "item")}
           </p>
@@ -100,7 +87,7 @@ export function CartView({ recommendations }: { recommendations: Product[] }) {
         </ul>
 
         <div className="lg:sticky lg:top-28">
-          <OrderSummary className="border border-line">
+          <OrderSummary className="rounded-[1.5rem] border border-line bg-surface p-1 shadow-md">
             <div className="flex flex-col gap-3">
               <ButtonLink href="/checkout" size="lg" block>
                 <LockSimple size={14} weight="fill" aria-hidden />

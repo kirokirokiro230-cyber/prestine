@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
 import type { AuditAction, AuditEntry } from "@/lib/types";
-import { getDb, isDatabaseConfigured } from "./db/client";
-import { fromAuditEntry, toAuditEntry } from "./db/mappers";
-import { auditLog } from "./db/schema";
-import { mutateStore, readStore } from "./store";
+import { db, insertInto, unwrap } from "./supabase";
+import type { AuditLogRow } from "./database.types";
 
 /**
  * Audit trail.
@@ -13,12 +10,27 @@ import { mutateStore, readStore } from "./store";
  * one member of staff this is the difference between "the price is wrong" and
  * "the price was changed at 14:12 by this account".
  *
- * Capped at a fixed number of entries so the store cannot grow without bound. Two
- * backends, chosen by whether a database is configured — see `login-attempts.ts`
- * for the precedent.
+ * Capped at a fixed number of entries so the table cannot grow without bound —
+ * the same overflow-delete shape `recordEmail()` in
+ * `repositories/email.ts` uses for its own log, for the same reason: a
+ * Postgres table has no in-place "keep only the most recent N" the JSON
+ * array's `.slice(0, MAX_ENTRIES)` used to give for free.
  */
 
 const MAX_ENTRIES = 500;
+
+function fromRow(row: AuditLogRow): AuditEntry {
+  return {
+    id: row.id,
+    at: row.at,
+    actorId: row.actor_id,
+    actorEmail: row.actor_email,
+    action: row.action,
+    entity: row.entity,
+    entityId: row.entity_id,
+    summary: row.summary,
+  };
+}
 
 export async function recordAudit(entry: {
   actorId: string | null;
@@ -28,56 +40,56 @@ export async function recordAudit(entry: {
   entityId: string;
   summary: string;
 }): Promise<void> {
-  const audit: AuditEntry = {
-    id: `aud_${randomUUID().slice(0, 8)}`,
-    at: new Date().toISOString(),
-    ...entry,
-  };
+  unwrap(
+    await insertInto(db(), "audit_log", {
+      id: `aud_${randomUUID().slice(0, 8)}`,
+      actor_id: entry.actorId,
+      actor_email: entry.actorEmail,
+      action: entry.action,
+      entity: entry.entity,
+      entity_id: entry.entityId,
+      summary: entry.summary,
+    }).overrideTypes<unknown, { merge: false }>(),
+  );
 
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      store.audit.unshift(audit);
-      if (store.audit.length > MAX_ENTRIES) {
-        store.audit = store.audit.slice(0, MAX_ENTRIES);
-      }
-    });
-    return;
-  }
-
-  const db = getDb();
-  await db.insert(auditLog).values(fromAuditEntry(audit));
-
-  // Cap the table the same way the JSON store caps the array: keep the newest
-  // MAX_ENTRIES rows, drop the rest.
-  const overflow = await db
-    .select({ id: auditLog.id })
-    .from(auditLog)
-    .orderBy(desc(auditLog.at))
-    .offset(MAX_ENTRIES);
-  for (const row of overflow) {
-    await db.delete(auditLog).where(eq(auditLog.id, row.id));
+  const overflow = unwrap(
+    await db()
+      .from("audit_log")
+      .select("id")
+      .order("at", { ascending: false })
+      .range(MAX_ENTRIES, MAX_ENTRIES + 999)
+      .overrideTypes<Array<{ id: string }>, { merge: false }>(),
+  );
+  if (overflow.length > 0) {
+    await db()
+      .from("audit_log")
+      .delete()
+      .in("id", overflow.map((entry) => entry.id));
   }
 }
 
 export async function listAudit(limit = 100): Promise<AuditEntry[]> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).audit.slice(0, limit);
-  }
-
-  const rows = await getDb().select().from(auditLog).orderBy(desc(auditLog.at)).limit(limit);
-  return rows.map(toAuditEntry);
+  const rows = unwrap(
+    await db()
+      .from("audit_log")
+      .select("*")
+      .order("at", { ascending: false })
+      .limit(limit)
+      .overrideTypes<AuditLogRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }
 
 /** Recent activity for one entity, shown on its detail page. */
 export async function auditFor(entity: string, entityId: string): Promise<AuditEntry[]> {
-  if (!isDatabaseConfigured()) {
-    const { audit } = await readStore();
-    return audit.filter((entry) => entry.entity === entity && entry.entityId === entityId);
-  }
-
-  const rows = await getDb()
-    .select()
-    .from(auditLog)
-    .where(and(eq(auditLog.entity, entity), eq(auditLog.entityId, entityId)));
-  return rows.map(toAuditEntry);
+  const rows = unwrap(
+    await db()
+      .from("audit_log")
+      .select("*")
+      .eq("entity", entity)
+      .eq("entity_id", entityId)
+      .order("at", { ascending: false })
+      .overrideTypes<AuditLogRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }

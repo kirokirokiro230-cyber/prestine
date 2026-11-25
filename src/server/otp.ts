@@ -1,11 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { normalisePhone } from "@/lib/phone";
 import type { OtpPurpose, PhoneVerification } from "@/lib/types";
 import { hashPassword, verifyPassword } from "./auth";
-import { getDb, isDatabaseConfigured } from "./db/client";
-import { fromPhoneVerification, toPhoneVerification } from "./db/mappers";
-import { phoneVerifications } from "./db/schema";
 import {
   clearFailedLogins,
   loginLockout,
@@ -13,8 +9,28 @@ import {
 } from "./login-attempts";
 import { getSettings } from "./repositories/settings";
 import { sendSms, type SmsResult } from "./sms";
-import { mutateStore, readStore } from "./store";
-import { checkVerification, startVerification, verifyConfigured } from "./verify";
+import { callRpc, db, insertInto, unwrap } from "./supabase";
+import type { PhoneVerificationRow } from "./database.types";
+import { checkTwoFactorOtp, startTwoFactorOtp, twoFactorConfigured } from "./twofactor";
+
+function fromRow(row: PhoneVerificationRow): PhoneVerification {
+  return {
+    id: row.id,
+    phone: row.phone,
+    purpose: row.purpose,
+    provider: row.provider,
+    codeHash: row.code_hash ?? undefined,
+    codeSalt: row.code_salt ?? undefined,
+    providerRef: row.provider_ref ?? undefined,
+    expiresAt: row.expires_at,
+    attempts: row.attempts,
+    createdAt: row.created_at,
+    pendingName: row.pending_name ?? undefined,
+    pendingPasswordHash: row.pending_password_hash ?? undefined,
+    pendingPasswordSalt: row.pending_password_salt ?? undefined,
+    pendingEmail: row.pending_email ?? undefined,
+  };
+}
 
 /**
  * One-time codes for the two moments that need one.
@@ -82,19 +98,35 @@ export const RESEND_COOLDOWN_MS = 60 * 1000;
 /**
  * Where the issuing quota is counted.
  *
- * Reuses the sliding-window limiter that guards sign-in: same policy, same dual backend,
- * same fail-open behaviour, and the same shared table when a database is configured. The
+ * Reuses the sliding-window limiter that guards sign-in: same policy, same store. The
  * functions are named for failed logins because that was their first caller, but what
  * they implement is "how many times has this key done a thing in the last fifteen
- * minutes" — and `login_attempts` already stores `ip:` keys alongside identifiers, so an
+ * minutes" — and the limiter already stores `ip:` keys alongside identifiers, so an
  * `otp:` key is not a new kind of contents.
  *
  * Counting this in the verification table instead would mean keeping spent codes around
  * purely to be counted, which is a worse answer than borrowing a limiter that is already
- * pruned, already shared across instances and already tested.
+ * pruned and already tested.
  */
 function quotaKey(phone: string): string {
   return `otp:${phone}`;
+}
+
+/**
+ * The second quota, counted per caller rather than per number.
+ *
+ * The per-phone cap alone bounds nothing that costs money: every SMS goes to a
+ * *different* number, so an attacker rotating numbers gets a fresh sixty-second
+ * cooldown and a fresh fifteen-minute allowance each time, and each one of those is a
+ * message this shop pays for. Signup is the cheapest path into it, because unlike reset
+ * it will issue to a number with no account.
+ *
+ * Capping per address is what actually bounds the bill. It is deliberately the weaker of
+ * the two keys — an address is only as trustworthy as the platform's headers — so it
+ * supplements the per-phone cap rather than replacing it.
+ */
+function ipQuotaKey(ip: string): string {
+  return `otp-ip:${ip}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -140,6 +172,12 @@ export async function issueCode(input: {
   purpose: OtpPurpose;
   /** Signup only. Held on the verification record until the code confirms. */
   pending?: PendingSignup;
+  /**
+   * The requesting address, for the per-caller SMS cap. Passed in rather than
+   * read from `headers()` here so this module stays independent of request
+   * context and remains testable.
+   */
+  ip?: string;
 }): Promise<IssueResult> {
   const phone = normalisePhone(input.phone);
   if (!phone) return { ok: false, error: "Enter a valid mobile number." };
@@ -171,32 +209,69 @@ export async function issueCode(input: {
     };
   }
 
+  /*
+   * The per-address cap. Deliberately worded without naming the number, since
+   * this trips on a caller working through many numbers rather than on one
+   * shopper's own number.
+   */
+  if (input.ip) {
+    const byIp = await loginLockout(ipQuotaKey(input.ip));
+    if (byIp.locked) {
+      const minutes = Math.max(1, Math.ceil(byIp.secondsRemaining / 60));
+      return {
+        ok: false,
+        error: `Too many codes requested recently. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      };
+    }
+  }
+
   /* ---- Issue ----------------------------------------------------- */
 
   /*
-   * Two transports, chosen once per deployment by which credential is set. When a Verify
-   * Service is configured Twilio generates, sends, expires and attempt-caps the code, so
-   * this row carries no hash and only exists to hold the pending signup between "sent"
-   * and "confirmed"; `verifyCode` reads `provider` to know not to compare a local hash.
-   * Otherwise this application generates the code and hashes it, the original path.
+   * Two transports, chosen once per deployment by which credential is set. When 2Factor
+   * is configured it generates, sends, expires and attempt-caps the code, so this row
+   * carries no hash and only exists to hold the pending signup — plus the session id
+   * needed to check the code later — between "sent" and "confirmed"; `verifyCode` reads
+   * `provider` to know not to compare a local hash. Otherwise this application generates
+   * the code and hashes it, the original path.
    */
-  const useVerify = verifyConfigured();
+  const useHostedProvider = twoFactorConfigured();
   const issuedAt = new Date(now);
 
   /*
    * The local path needs the plaintext once — to text it — and stores only its hash.
-   * The Verify path never sees a code at all, so it generates neither.
+   * The hosted path never sees a code at all, so it generates neither.
    */
-  const code = useVerify ? null : generateCode();
+  const code = useHostedProvider ? null : generateCode();
   const local = code ? await hashPassword(code) : null;
+
+  /*
+   * The hosted send call has to happen *before* the row is written, unlike the local
+   * path: it is what produces the session id (`providerRef`) the row needs to carry.
+   * Doing it here rather than after the insert (as the local path's send happens)
+   * would leave a row with no way to be verified if the write later failed — a strictly
+   * worse partial state than simply not having sent anything yet.
+   */
+  let providerRef: string | undefined;
+  if (useHostedProvider) {
+    const started = await startTwoFactorOtp(phone);
+    if (started.status === "failed") {
+      return {
+        ok: false,
+        error: "We could not send a code to that number just now. Please try again.",
+      };
+    }
+    providerRef = started.sessionId;
+  }
 
   const verification: PhoneVerification = {
     id: `otp_${randomUUID().slice(0, 8)}`,
     phone,
     purpose: input.purpose,
-    provider: useVerify ? "twilio-verify" : "local",
+    provider: useHostedProvider ? "2factor" : "local",
     codeHash: local?.hash,
     codeSalt: local?.salt,
+    providerRef,
     expiresAt: new Date(now + CODE_TTL_MS).toISOString(),
     attempts: 0,
     createdAt: issuedAt.toISOString(),
@@ -206,60 +281,79 @@ export async function issueCode(input: {
     pendingPasswordSalt: input.pending?.passwordSalt,
   };
 
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      /*
-       * Replace this number's live code for this purpose, and sweep anything that has
-       * expired anywhere. Pruning on write rather than on a schedule, for the reason
-       * `recordFailedLogin` does the same: a cleanup job someone has to remember exists is
-       * a cleanup job that eventually is not running.
-       */
-      store.phoneVerifications = store.phoneVerifications.filter(
-        (entry) =>
-          !(entry.phone === phone && entry.purpose === input.purpose) &&
-          new Date(entry.expiresAt).getTime() > now,
-      );
-      store.phoneVerifications.push(verification);
-    });
-  } else {
-    const db = getDb();
-    // Replace this number's live code for this purpose, and sweep anything expired.
-    await db
-      .delete(phoneVerifications)
-      .where(
-        and(eq(phoneVerifications.phone, phone), eq(phoneVerifications.purpose, input.purpose)),
-      );
-    await db.delete(phoneVerifications).where(lt(phoneVerifications.expiresAt, new Date(now)));
-    await db.insert(phoneVerifications).values(fromPhoneVerification(verification));
-  }
+  /*
+   * Replace this number's live code for this purpose, and sweep anything that has
+   * expired anywhere. Pruning on write rather than on a schedule, for the reason
+   * `recordFailedLogin` does the same: a cleanup job someone has to remember exists is
+   * a cleanup job that eventually is not running.
+   *
+   * Two deletes rather than one `.or()`, because the two conditions are
+   * independent (this number+purpose's live code, vs. anyone's expired
+   * code) — combining them into a single filter would need the same
+   * `.or()` string-escaping care flagged in `repositories/orders.ts`'s
+   * queryOrders() for no benefit, since both are unconditional deletes with
+   * no result to merge.
+   */
+  await db().from("phone_verifications").delete().eq("phone", phone).eq("purpose", input.purpose);
+  await db()
+    .from("phone_verifications")
+    .delete()
+    .lt("expires_at", new Date(now).toISOString());
+
+  unwrap(
+    await insertInto(db(), "phone_verifications", {
+      id: verification.id,
+      phone: verification.phone,
+      purpose: verification.purpose,
+      provider: verification.provider,
+      code_hash: verification.codeHash ?? null,
+      code_salt: verification.codeSalt ?? null,
+      provider_ref: verification.providerRef ?? null,
+      expires_at: verification.expiresAt,
+      attempts: verification.attempts,
+      created_at: verification.createdAt,
+      pending_name: verification.pendingName ?? null,
+      pending_password_hash: verification.pendingPasswordHash ?? null,
+      pending_password_salt: verification.pendingPasswordSalt ?? null,
+      pending_email: verification.pendingEmail ?? null,
+    }).overrideTypes<unknown, { merge: false }>(),
+  );
 
   // Counted after the record is written, so a failed write does not consume quota.
   await recordFailedLogin(quotaKey(phone));
+  if (input.ip) await recordFailedLogin(ipQuotaKey(input.ip));
 
   /*
-   * Whichever transport is configured sends the code. Verify composes and sends its own
-   * message; the local path composes ours and hands it to the SMS transport, which in
-   * turn falls back to logging the code when no provider is set at all.
+   * 2Factor already sent its message above, before the row existed — see the comment
+   * where `providerRef` is obtained for why. Only the local path's send still happens
+   * here, composing our own text and handing it to the SMS transport, which falls back
+   * to logging the code when no provider is set at all.
    */
-  const result: SmsResult = useVerify
-    ? await startVerification(phone)
-    : await sendSms(phone, smsBody((await getSettings()).name, code!));
+  if (!useHostedProvider) {
+    const result: SmsResult = await sendSms(phone, smsBody((await getSettings()).name, code!));
 
-  if (result.status === "failed") {
-    /*
-     * The code exists but nobody has it. Remove it so the cooldown does not strand the
-     * shopper behind a sixty-second wait for a message that was never going to arrive.
-     */
-    await discardVerification(verification.id);
+    if (result.status === "failed") {
+      /*
+       * The code exists but nobody has it. Remove it so the cooldown does not strand the
+       * shopper behind a sixty-second wait for a message that was never going to arrive.
+       */
+      await discardVerification(verification.id);
+      return {
+        ok: false,
+        error: "We could not send a code to that number just now. Please try again.",
+      };
+    }
+
     return {
-      ok: false,
-      error: "We could not send a code to that number just now. Please try again.",
+      ok: true,
+      delivery: result.status,
+      retryAfterSeconds: Math.ceil(RESEND_COOLDOWN_MS / 1000),
     };
   }
 
   return {
     ok: true,
-    delivery: result.status,
+    delivery: "sent",
     retryAfterSeconds: Math.ceil(RESEND_COOLDOWN_MS / 1000),
   };
 }
@@ -337,15 +431,43 @@ export async function verifyCode(
     return invalid;
   }
 
-  if (verification.provider === "twilio-verify") {
+  if (verification.provider === "2factor") {
     /*
-     * Twilio owns the code, its expiry and its attempt cap. This row's `attempts` stays
-     * 0 and is not consulted — a `max_attempts_reached` or `expired` verdict comes back
-     * from Twilio as `wrong-code`, the same as a plain mistype, because from the form's
-     * side all three mean "that code no longer works, ask for another".
+     * 2Factor owns the code, its expiry and its attempt cap. This row's `attempts`
+     * stays 0 and is not consulted — an expired or exhausted session comes back as
+     * `wrong-code`, the same as a plain mistype, because from the form's side both
+     * mean "that code no longer works, ask for another". `providerRef` is mandatory
+     * here: it is the session id from the AUTOGEN call this verification was issued
+     * with, and a row of this provider always has one (see `issueCode`).
      */
-    const check = await checkVerification(phone, code);
+    /*
+     * Our own attempt cap, in front of the provider's. The comment above says 2Factor
+     * tracks its own cap, and it may — but that is a setting on someone else's
+     * account that nothing here can observe, and the whole safety argument at the top
+     * of this file ("three factors of the same product") needs the five-guess limit to
+     * be real. If the provider's were looser or absent, six digits would be one
+     * secret in a million with unlimited guesses for ten minutes. Counting here makes
+     * the limit true regardless of what the provider does.
+     */
+    if (verification.attempts >= MAX_ATTEMPTS) {
+      await discardVerification(verification.id);
+      return { ok: false, error: "Too many incorrect attempts. Request a new code." };
+    }
+
+    const check = verification.providerRef
+      ? await checkTwoFactorOtp(verification.providerRef, code)
+      : { ok: false as const, reason: "provider-error" as const };
+
     if (!check.ok) {
+      // A provider fault is not the shopper's mistake, so it does not spend an attempt.
+      if (check.reason !== "provider-error") {
+        const remaining = await countAttempt(verification.id);
+        if (remaining <= 0) {
+          await discardVerification(verification.id);
+          return { ok: false, error: "Too many incorrect attempts. Request a new code." };
+        }
+      }
+
       return {
         ok: false,
         error:
@@ -358,6 +480,19 @@ export async function verifyCode(
     await discardVerification(verification.id);
     await clearFailedLogins(quotaKey(phone));
     return { ok: true, verification };
+  }
+
+  if (verification.provider === "twilio-verify") {
+    /*
+     * This store no longer sends codes through Twilio Verify — see `issueCode`, which
+     * never writes this provider value any more. A row can only reach this branch if
+     * it was issued in the few minutes before this switch and has not yet expired
+     * (`CODE_TTL_MS` is ten minutes), so there is nothing left to check it against.
+     * Treated as an ordinary "ask for another" rather than a fault: the shopper's
+     * next code will be issued by whichever provider is configured now.
+     */
+    await discardVerification(verification.id);
+    return invalid;
   }
 
   if (verification.attempts >= MAX_ATTEMPTS) {
@@ -411,67 +546,36 @@ async function liveVerification(
   purpose: OtpPurpose,
   now: number,
 ): Promise<PhoneVerification | undefined> {
-  if (!isDatabaseConfigured()) {
-    const store = await readStore();
-    return store.phoneVerifications.find(
-      (entry) =>
-        entry.phone === phone &&
-        entry.purpose === purpose &&
-        new Date(entry.expiresAt).getTime() > now,
-    );
-  }
-
-  const [row] = await getDb()
-    .select()
-    .from(phoneVerifications)
-    .where(
-      and(
-        eq(phoneVerifications.phone, phone),
-        eq(phoneVerifications.purpose, purpose),
-        gt(phoneVerifications.expiresAt, new Date(now)),
-      ),
-    );
-  return row ? toPhoneVerification(row) : undefined;
+  const row = unwrap(
+    await db()
+      .from("phone_verifications")
+      .select("*")
+      .eq("phone", phone)
+      .eq("purpose", purpose)
+      .gt("expires_at", new Date(now).toISOString())
+      .maybeSingle()
+      .overrideTypes<PhoneVerificationRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 /**
  * Record a wrong guess. Returns how many are left.
  *
- * Read and write in one mutation, because the cap is only a cap if two simultaneous
- * guesses cannot both read `attempts` as four. `mutateStore` serialises mutations on the
- * JSON-store path; against Postgres, `attempts = attempts + 1 returning` performs the
- * same increment atomically in the database rather than in application code.
+ * `attempts = attempts + 1` is issued as a single atomic UPDATE rather than
+ * read-then-write, so two simultaneous guesses cannot both read `attempts`
+ * as four and both write five — the increment happens inside Postgres's own
+ * row lock, which is what `mutateStore`'s serialised queue used to
+ * guarantee for the JSON document as a whole.
  */
 async function countAttempt(id: string): Promise<number> {
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const entry = store.phoneVerifications.find((candidate) => candidate.id === id);
-      if (!entry) return 0;
-
-      entry.attempts += 1;
-      return Math.max(0, MAX_ATTEMPTS - entry.attempts);
-    });
-  }
-
-  const db = getDb();
-  const [row] = await db
-    .update(phoneVerifications)
-    .set({ attempts: sql`${phoneVerifications.attempts} + 1` })
-    .where(eq(phoneVerifications.id, id))
-    .returning({ attempts: phoneVerifications.attempts });
-  if (!row) return 0;
-  return Math.max(0, MAX_ATTEMPTS - row.attempts);
+  const { data, error } = await callRpc(db(), "increment_verification_attempts", { p_id: id });
+  if (error) throw new Error(error.message);
+  const attempts = data ?? MAX_ATTEMPTS;
+  return Math.max(0, MAX_ATTEMPTS - attempts);
 }
 
 async function discardVerification(id: string): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      store.phoneVerifications = store.phoneVerifications.filter(
-        (entry) => entry.id !== id,
-      );
-    });
-    return;
-  }
-
-  await getDb().delete(phoneVerifications).where(eq(phoneVerifications.id, id));
+  const { error } = await db().from("phone_verifications").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }

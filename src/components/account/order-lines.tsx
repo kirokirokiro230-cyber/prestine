@@ -87,6 +87,10 @@ export function OrderLines({
           {order.totals.shipping === 0 ? "Complimentary" : money(order.totals.shipping)}
         </Row>
         <Row term="Tax">{money(order.totals.tax)}</Row>
+        {/* Only on a COD order, and only when the shop charged one. */}
+        {order.totals.codFee > 0 ? (
+          <Row term="Cash on delivery fee">{money(order.totals.codFee)}</Row>
+        ) : null}
         <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
           <dt className="font-medium">Total</dt>
           <dd data-numeric className="text-base">

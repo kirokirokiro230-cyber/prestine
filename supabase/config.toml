@@ -1,0 +1,24 @@
+# Supabase CLI project config.
+#
+# This file is what makes `supabase/` a CLI-recognised project directory. It
+# does not need editing for a hosted (not local) Supabase project — the
+# migrations run the same way against the project referenced in .env.local's
+# SUPABASE_URL regardless of what's below. This mainly matters if you ever run
+# `supabase start` for a local Postgres instance during development.
+
+project_id = "prestine"
+
+[db]
+port = 54322
+major_version = 15
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[studio]
+enabled = true
+port = 54323

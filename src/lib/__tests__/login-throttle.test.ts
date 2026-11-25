@@ -89,6 +89,51 @@ describe("lockoutFrom", () => {
       expect(lockoutFrom(attempts, now).locked).toBe(true);
     }
   });
+
+  /*
+   * The public endpoints share this policy but need their own ceilings — a
+   * shopper checking PIN codes must not be held to the five-guess sign-in
+   * limit. Only the count varies; the window stays fixed.
+   */
+  describe("with a custom allowance", () => {
+    it("defaults to the sign-in limit", () => {
+      const attempts = failures(MAX_ATTEMPTS, NOW);
+      expect(lockoutFrom(attempts, NOW)).toEqual(
+        lockoutFrom(attempts, NOW, MAX_ATTEMPTS),
+      );
+    });
+
+    it("allows more than the sign-in limit when raised", () => {
+      const attempts = failures(MAX_ATTEMPTS, NOW);
+      expect(lockoutFrom(attempts, NOW, 30).locked).toBe(false);
+    });
+
+    it("locks on the raised limit", () => {
+      expect(lockoutFrom(failures(30, NOW), NOW, 30).locked).toBe(true);
+      expect(lockoutFrom(failures(29, NOW), NOW, 30).locked).toBe(false);
+    });
+
+    it("locks sooner when lowered", () => {
+      expect(lockoutFrom(failures(2, NOW), NOW, 2).locked).toBe(true);
+    });
+
+    /** Zero or a negative allowance would otherwise lock everyone out forever. */
+    it("treats a limit below one as one", () => {
+      expect(lockoutFrom([], NOW, 0).locked).toBe(false);
+      expect(lockoutFrom(failures(1, NOW), NOW, 0).locked).toBe(true);
+    });
+
+    it("still counts from the newest end", () => {
+      const attempts = failures(10, NOW);
+      const lockout = lockoutFrom(attempts, NOW, 3);
+      const sorted = [...attempts].sort((a, b) => a - b);
+      const decisive = sorted[sorted.length - 3];
+
+      expect(lockout.secondsRemaining).toBe(
+        Math.ceil((decisive + WINDOW_MS - NOW) / 1000),
+      );
+    });
+  });
 });
 
 describe("lockoutMessage", () => {

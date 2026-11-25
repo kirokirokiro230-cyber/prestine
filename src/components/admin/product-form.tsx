@@ -98,6 +98,18 @@ export function ProductForm({
 
       <FormFeedback error={state.error} success={state.success} />
 
+      <div className="sticky top-[4.75rem] z-30 -mx-1 flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface/95 p-3 shadow-lg backdrop-blur-xl xl:hidden">
+        <div className="min-w-0 px-1">
+          <p className="truncate text-sm font-semibold text-content">
+            {isEdit ? product!.name : "New product"}
+          </p>
+          <p className="text-xs text-content-muted">Save your progress</p>
+        </div>
+        <SubmitButton pendingLabel={isEdit ? "Saving…" : "Creating…"}>
+          {isEdit ? "Save" : "Create"}
+        </SubmitButton>
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr] xl:items-start">
         {/* ---------------- Main column ---------------- */}
         <div className="flex flex-col gap-6">
@@ -222,7 +234,7 @@ export function ProductForm({
             }
           >
             {state.fieldErrors?.colors ? (
-              <p role="alert" className="mb-4 text-xs text-danger-500">
+              <p role="alert" className="mb-4 text-xs text-danger-500 dark:text-danger-100">
                 {state.fieldErrors.colors}
               </p>
             ) : null}
@@ -335,7 +347,7 @@ export function ProductForm({
             />
 
             {state.fieldErrors?.sizes ? (
-              <p role="alert" className="mt-4 text-xs text-danger-500">
+              <p role="alert" className="mt-4 text-xs text-danger-500 dark:text-danger-100">
                 {state.fieldErrors.sizes}
               </p>
             ) : null}
@@ -427,7 +439,7 @@ export function ProductForm({
         </div>
 
         {/* ---------------- Sidebar ---------------- */}
-        <div className="flex flex-col gap-6 xl:sticky xl:top-20">
+        <div className="flex flex-col gap-6 xl:sticky xl:top-24">
           <Panel title="Publication">
             <div className="flex flex-col gap-5">
               <SelectField

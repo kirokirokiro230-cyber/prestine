@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Plus } from "@phosphor-icons/react/dist/ssr";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { ProductsTable } from "@/components/admin/products-table";
 import { Panel } from "@/components/admin/primitives";
 import { ButtonLink } from "@/components/ui/button";
@@ -57,20 +58,19 @@ export default async function AdminProductsPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl leading-tight">Products</h1>
-          <p data-numeric className="mt-1.5 text-sm text-content-muted">
-            {result.total} product{result.total === 1 ? "" : "s"}
-            {status !== "all" ? ` · ${status}` : ""}
-          </p>
-        </div>
-
-        <ButtonLink href="/admin/products/new" size="md">
-          <Plus size={14} aria-hidden />
-          New product
-        </ButtonLink>
-      </header>
+      <AdminPageHeader
+        eyebrow="Catalogue"
+        title="Products"
+        description={`${result.total} product${result.total === 1 ? "" : "s"}${
+          status !== "all" ? ` · ${status}` : ""
+        } across your live and draft catalogue.`}
+        actions={
+          <ButtonLink href="/admin/products/new" size="md">
+            <Plus size={14} aria-hidden />
+            New product
+          </ButtonLink>
+        }
+      />
 
       {params.deleted ? (
         <p role="status" className="border border-success-500/40 bg-success-100/60 px-3 py-2.5 text-sm text-success-700 dark:bg-success-700/20 dark:text-success-100">

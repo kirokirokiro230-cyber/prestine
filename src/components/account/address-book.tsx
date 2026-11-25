@@ -7,7 +7,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Modal } from "@/components/ui/modal";
 import { ComboboxField } from "@/components/ui/combobox";
 import { SelectField, TextField } from "@/components/ui/field";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useBrowserStore, useIsHydrated, useResetOnChange } from "@/hooks/use-store";
+import { isDeliverable, upsertAddress } from "@/lib/address";
 import { addressName } from "@/lib/format";
 import { STATE_OPTIONS, citySuggestions } from "@/lib/india";
 import { addressStore } from "@/lib/stores";
@@ -64,6 +66,10 @@ export function AddressBook() {
       line1: required(draft.line1, "Address") ?? undefined,
       city: required(draft.city, "City") ?? undefined,
       region: required(draft.region, "State or county") ?? undefined,
+      // Same rule as checkout, so the two forms cannot accept different things.
+      postalCode: !/^[1-9][0-9]{5}$/.test((draft.postalCode ?? "").trim())
+        ? "Enter a valid 6-digit pincode"
+        : undefined,
       phone: validatePhone(draft.phone, false) ?? undefined,
     };
 
@@ -79,10 +85,19 @@ export function AddressBook() {
     if (!validate()) return;
 
     setAddresses((current) => {
-      if (editingIndex === null) return [...current, draft];
-      const next = [...current];
-      next[editingIndex] = draft;
-      return next;
+      if (editingIndex !== null) {
+        const next = [...current];
+        next[editingIndex] = draft;
+        return next;
+      }
+
+      /*
+       * `upsertAddress` rather than a plain append, so adding an address that is
+       * already in the book brings the existing one forward instead of listing
+       * it twice. Same function checkout uses — one definition of "same
+       * address" for both.
+       */
+      return upsertAddress(current, draft);
     });
     setOpen(false);
   };
@@ -103,9 +118,9 @@ export function AddressBook() {
 
   if (!hydrated) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div role="status" aria-label="Loading your addresses" className="grid gap-4 sm:grid-cols-2">
         {Array.from({ length: 2 }, (_, i) => (
-          <div key={i} className="h-40 animate-shimmer bg-surface-sunken" />
+          <Skeleton key={i} className="h-40 w-full" />
         ))}
       </div>
     );
@@ -139,11 +154,24 @@ export function AddressBook() {
                 key={`${address.line1}-${index}`}
                 className="border border-line bg-surface p-5"
               >
-                {index === 0 ? (
-                  <p className="mb-3 text-2xs font-medium uppercase tracking-[0.12em] text-accent">
-                    Default
-                  </p>
-                ) : null}
+                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {index === 0 ? (
+                    <p className="text-2xs font-medium uppercase tracking-[0.12em] text-accent">
+                      Default
+                    </p>
+                  ) : null}
+
+                  {/*
+                    Entries saved before the pincode field existed. Flagged
+                    rather than hidden: the shopper needs to know why checkout
+                    will not let them use it, and editing it takes one click.
+                  */}
+                  {!isDeliverable(address) ? (
+                    <p className="text-2xs font-medium uppercase tracking-[0.12em] text-warning-700 dark:text-warning-100">
+                      Needs a pincode
+                    </p>
+                  ) : null}
+                </div>
 
                 <address className="text-sm not-italic leading-relaxed text-content-muted">
                   <span className="block font-medium text-content">
@@ -271,6 +299,28 @@ export function AddressBook() {
               required
             />
           </div>
+
+          {/*
+            Required, like it is at checkout. The courier routes on it and
+            Delhivery refuses a shipment without one, so an address saved
+            without a pincode cannot actually be delivered to — which is what
+            made the entries saved before this field existed unusable.
+          */}
+          <TextField
+            label="Pincode"
+            type="text"
+            inputMode="numeric"
+            autoComplete="postal-code"
+            placeholder="385001"
+            maxLength={6}
+            value={draft.postalCode ?? ""}
+            onChange={(event) =>
+              set("postalCode", event.target.value.replace(/\D/g, ""))
+            }
+            error={errors.postalCode}
+            hint="6-digit postal code, used to route the parcel."
+            required
+          />
 
           <TextField
             label="Phone number"

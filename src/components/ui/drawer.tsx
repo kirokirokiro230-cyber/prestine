@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { X } from "@phosphor-icons/react";
+import { useHorizontalSwipe } from "@/hooks/use-horizontal-swipe";
 import { useIsHydrated } from "@/hooks/use-store";
 import { useEscapeKey, useFocusTrap, useScrollLock } from "@/hooks/use-ui";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,8 @@ interface DrawerProps {
   /** Pinned to the bottom of the panel, outside the scroll area. */
   footer?: React.ReactNode;
   widthClass?: string;
+  /** Optional theme/surface class applied to the portal panel itself. */
+  panelClassName?: string;
   children: React.ReactNode;
 }
 
@@ -44,6 +47,7 @@ export function Drawer({
   description,
   footer,
   widthClass = "w-full max-w-md",
+  panelClassName,
   children,
 }: DrawerProps) {
   const panelRef = useFocusTrap<HTMLDivElement>(open);
@@ -52,6 +56,13 @@ export function Drawer({
 
   useScrollLock(open);
   useEscapeKey(open, onClose);
+
+  const swipeHandlers = useHorizontalSwipe({
+    enabled: side !== "bottom",
+    onSwipeLeft: side === "left" ? onClose : undefined,
+    onSwipeRight: side === "right" ? onClose : undefined,
+    threshold: 56,
+  });
 
   if (!hydrated || !open) return null;
 
@@ -78,9 +89,13 @@ export function Drawer({
           "absolute flex flex-col bg-surface shadow-xl",
           SIDE_PANEL[side],
           side === "bottom" ? "w-full" : widthClass,
+          panelClassName,
         )}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
+        <header
+          {...swipeHandlers}
+          className="flex touch-pan-y select-none items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6"
+        >
           <div className="min-w-0">
             <h2
               id={titleId}

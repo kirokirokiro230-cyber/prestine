@@ -67,13 +67,25 @@ export async function saveSettingsAction(
     const taxPercent = Number(String(formData.get("taxRate") ?? ""));
     const freeShipping = money(formData.get("freeShippingThreshold"));
     const standardRate = money(formData.get("standardShippingRate"));
-    const returnDays = Number(String(formData.get("returnWindowDays") ?? ""));
+    const returnHours = Number(String(formData.get("returnWindowHours") ?? ""));
     const arrivalsCount = Number(String(formData.get("homeNewArrivalsCount") ?? ""));
     const deliveryMin = Number(String(formData.get("deliveryDaysMin") ?? ""));
     const deliveryMax = Number(String(formData.get("deliveryDaysMax") ?? ""));
     const reviewDelay = Number(String(formData.get("reviewRequestDelayDays") ?? ""));
+    const codFee = money(formData.get("codFee"));
+    const codMinOrder = money(formData.get("codMinOrder"));
+    const codMaxOrder = money(formData.get("codMaxOrder"));
+    const firstOrderPercent = Number(String(formData.get("firstOrderDiscountPercent") ?? ""));
 
     const fieldErrors: Record<string, string> = {};
+    /*
+     * Whole percentages only, and capped at 100 by the database as well. A fractional or
+     * negative figure would produce an odd discount, and "10.5" is more likely a typo for
+     * 10 or 105 than a deliberate rate.
+     */
+    if (!Number.isInteger(firstOrderPercent) || firstOrderPercent < 0 || firstOrderPercent > 100) {
+      fieldErrors.firstOrderDiscountPercent = "Enter a whole number between 0 and 100.";
+    }
     /*
      * Capped at 24 rather than left open. The home page renders this many cards in a
      * four-column grid with a horizontal rail; an accidental 500 would ship the whole
@@ -116,8 +128,36 @@ export async function saveSettingsAction(
     if (!Number.isFinite(standardRate) || standardRate < 0) {
       fieldErrors.standardShippingRate = "Enter a valid amount.";
     }
-    if (!Number.isFinite(returnDays) || returnDays < 0) {
-      fieldErrors.returnWindowDays = "Enter a number of days.";
+    /*
+     * Zero is allowed and means no returns at all. The ceiling is a year: this value
+     * is now enforced, so a fat-fingered 48000 would quietly hold the shop to a
+     * five-year returns liability rather than just reading oddly in the footer.
+     */
+    if (!Number.isFinite(returnHours) || returnHours < 0 || returnHours > 8760) {
+      fieldErrors.returnWindowHours = "Enter a number of hours between 0 and 8760 (one year).";
+    }
+
+    for (const [value, field] of [
+      [codFee, "codFee"],
+      [codMinOrder, "codMinOrder"],
+      [codMaxOrder, "codMaxOrder"],
+    ] as const) {
+      if (!Number.isFinite(value) || value < 0) {
+        fieldErrors[field] = "Enter a valid amount, or zero.";
+      }
+    }
+    /*
+     * A window with the ceiling below the floor offers COD on nothing, silently.
+     * Reported rather than normalised, because a merchant who typed them the
+     * wrong way round should see it.
+     */
+    if (
+      !fieldErrors.codMinOrder &&
+      !fieldErrors.codMaxOrder &&
+      codMaxOrder > 0 &&
+      codMinOrder > codMaxOrder
+    ) {
+      fieldErrors.codMaxOrder = "The maximum must be at least the minimum, or zero for no limit.";
     }
 
     const url = String(formData.get("url") ?? "").trim();
@@ -144,7 +184,12 @@ export async function saveSettingsAction(
       taxRate: taxPercent / 100,
       freeShippingThreshold: freeShipping,
       standardShippingRate: standardRate,
-      returnWindowDays: Math.trunc(returnDays),
+      codEnabled: formData.get("codEnabled") === "on",
+      codFee,
+      codMinOrder,
+      codMaxOrder,
+      firstOrderDiscountPercent: firstOrderPercent,
+      returnWindowHours: Math.trunc(returnHours),
       deliveryDaysMin: Math.trunc(deliveryMin),
       deliveryDaysMax: Math.trunc(deliveryMax),
       reviewRequestDelayDays: Math.trunc(reviewDelay),

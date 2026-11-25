@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { beforeAll, describe, it } from "vitest";
+import { describe, it } from "vitest";
 import {
   createSessionToken,
   hashPassword,
@@ -17,16 +16,11 @@ import {
  * than a broken screen, so the properties worth pinning down are: a password is
  * never recoverable from what is stored, a token cannot be edited without
  * invalidating it, and an expired token is refused.
+ *
+ * Every function under test here is pure (hashing, token encode/decode, role
+ * checks) with no storage dependency, so this file needs no Supabase project
+ * and no fixture cleanup.
  */
-
-beforeAll(() => {
-  const path = ".test-store/auth.json";
-  process.env.PRESTINE_STORE_PATH = path;
-
-  // Fresh store per run, so admin-account assertions cannot be satisfied (or
-  // broken) by accounts a previous run created. See repositories.test.ts.
-  rmSync(path, { force: true });
-});
 
 const PASSWORD = "Prestine-Test-1234";
 

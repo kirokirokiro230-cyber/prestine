@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Tag, X } from "@phosphor-icons/react";
 import { useCart } from "@/components/providers/cart-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import { Button } from "@/components/ui/button";
 import { ConfettiBurst } from "@/components/ui/confetti-burst";
 import { applyPromo, savingsFromMarkdowns } from "@/lib/cart-math";
+import { firstOrderAmount } from "@/lib/first-order";
 import { cn } from "@/lib/utils";
 import { FreeShippingMeter } from "./free-shipping-meter";
 
@@ -20,15 +22,30 @@ import { FreeShippingMeter } from "./free-shipping-meter";
 export function OrderSummary({
   showShipping = false,
   showPromo = true,
+  codFee = 0,
   children,
   className,
 }: {
   showShipping?: boolean;
   showPromo?: boolean;
+  /**
+   * COD handling fee to include, in minor units.
+   *
+   * Passed in by the checkout's payment step rather than read from the cart,
+   * because it depends on which method is selected there — and the cart page,
+   * where nothing has been chosen yet, must not quote it. Defaults to zero so
+   * every other caller is unaffected.
+   *
+   * It exists because the alternative is worse: a sticky summary reading one
+   * total while the button beside it reads another is the kind of discrepancy a
+   * shopper notices at precisely the wrong moment.
+   */
+  codFee?: number;
   children?: React.ReactNode;
   className?: string;
 }) {
-  const { lines, summary, promoCode, setPromoCode, subtotal, rules, money } = useCart();
+  const { lines, summary, promoCode, setPromoCode, subtotal, rules, money, firstOrderOffer } =
+    useCart();
   const { notify } = useToast();
   const [code, setCode] = useState("");
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -50,6 +67,21 @@ export function OrderSummary({
       setPromoError(result.reason);
       return;
     }
+    /*
+     * The two do not combine; the larger applies. A code worth no more than the first-order
+     * discount would be accepted and then do nothing, with the field closing as if it had
+     * worked. Say so instead, and keep the single-use discount.
+     */
+    if (
+      firstOrderOffer?.kind === "eligible" &&
+      firstOrderAmount(subtotal, rules.firstOrderPercent) >= result.discount
+    ) {
+      setPromoError(
+        `Your first-order discount (${rules.firstOrderPercent}% off) is worth at least as much as this code, so it is already applied.`,
+      );
+      return;
+    }
+
     setPromoError(null);
     setPromoCode(result.promo.code);
     setCode("");
@@ -121,6 +153,23 @@ export function OrderSummary({
           </div>
         ) : null}
 
+        {summary.discount > 0 && summary.firstOrder ? (
+          <div className="flex items-start justify-between gap-3">
+            <dt className="flex min-w-0 flex-wrap items-center gap-2 text-content-muted">
+              <span className="inline-flex items-center gap-1.5 bg-accent-soft px-2 py-1 text-2xs font-medium uppercase tracking-[0.08em] text-accent">
+                <Tag size={11} weight="fill" aria-hidden />
+                First order · {summary.firstOrder.percent}% off
+              </span>
+            </dt>
+            <dd
+              data-numeric
+              className="shrink-0 text-success-700 tabular-nums dark:text-success-500"
+            >
+              −{money(summary.discount)}
+            </dd>
+          </div>
+        ) : null}
+
         <Row term="Shipping">
           {showShipping ? (
             summary.shipping === 0 ? (
@@ -140,16 +189,22 @@ export function OrderSummary({
             <span className="text-content-subtle">At next step</span>
           )}
         </Row>
+
+        {codFee > 0 ? (
+          <Row term="Cash on delivery fee">{money(codFee)}</Row>
+        ) : null}
       </dl>
 
       <div className="mt-5 flex items-baseline justify-between border-t border-line pt-5">
         <span className="text-sm font-medium">Total</span>
         <span data-numeric className="text-xl">
           {showShipping
-            ? money(summary.total)
+            ? money(summary.total + codFee)
             : money(summary.subtotal - summary.discount)}
         </span>
       </div>
+
+      <FirstOrderNote />
 
       <div className="mt-5">
         <FreeShippingMeter />
@@ -188,7 +243,11 @@ export function OrderSummary({
           </div>
 
           {promoError ? (
-            <p id="promo-error" role="alert" className="mt-2 text-xs text-danger-500">
+            <p
+              id="promo-error"
+              role="alert"
+              className="mt-2 text-xs text-danger-500 dark:text-danger-100"
+            >
               {promoError}
             </p>
           ) : suggestion ? (
@@ -202,6 +261,69 @@ export function OrderSummary({
 
       {children ? <div className="mt-6">{children}</div> : null}
     </div>
+  );
+}
+
+/**
+ * One line about the first-order discount when the shopper does not have it applied.
+ *
+ * Says only what helps: sign in to get it, finish the unpaid order that is holding it, or
+ * that it is being kept because a code is worth more. Says nothing when it was used, when
+ * this is not a first order, or when there is no offer, because "you can't have this" is
+ * not something to put in front of a returning customer on every visit.
+ */
+function FirstOrderNote() {
+  const { firstOrderOffer, summary, lines, promoCode, setPromoCode } = useCart();
+
+  if (!firstOrderOffer || lines.length === 0) return null;
+
+  let content: React.ReactNode = null;
+
+  if (summary.firstOrder && promoCode) {
+    // A code was entered, and the first-order discount turned out to be worth more, so the
+    // code is doing nothing. Without this line it would vanish with no explanation.
+    content = (
+      <>
+        Code {promoCode} is not used: your first-order discount is worth more.{" "}
+        <button
+          type="button"
+          onClick={() => setPromoCode(null)}
+          className="underline underline-offset-2 hover:text-accent"
+        >
+          Remove it
+        </button>
+      </>
+    );
+  } else if (firstOrderOffer.kind === "sign-in") {
+    content = (
+      <>
+        <Link href="/signin" className="underline underline-offset-2 hover:text-accent">
+          Sign in
+        </Link>{" "}
+        or{" "}
+        <Link href="/signup" className="underline underline-offset-2 hover:text-accent">
+          create an account
+        </Link>{" "}
+        for {firstOrderOffer.percent}% off your first order.
+      </>
+    );
+  } else if (firstOrderOffer.kind === "held") {
+    content = (
+      <>
+        Your first-order discount is on order {firstOrderOffer.orderId}, which is not paid yet.
+        Pay for it, or cancel it from your account to use the discount here.
+      </>
+    );
+  } else if (firstOrderOffer.kind === "eligible" && summary.promo) {
+    content = <>Your first-order discount is saved for your next order.</>;
+  }
+
+  if (!content) return null;
+
+  return (
+    <p className="mt-4 text-xs leading-relaxed text-content-muted" role="status">
+      {content}
+    </p>
   );
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { getFirstOrderOffer, type FirstOrderOffer } from "@/app/actions/first-order";
 import { useBrowserStore, useIsHydrated } from "@/hooks/use-store";
 import { cartStore } from "@/lib/stores";
 import {
@@ -53,6 +55,13 @@ interface CartContextValue {
   promoCode: string | null;
   setPromoCode: (code: string | null) => void;
 
+  /**
+   * What the server last said about the first-order discount for this shopper, or `null`
+   * before it has said anything. Only `eligible` changes the totals.
+   */
+  firstOrderOffer: FirstOrderOffer | null;
+  /** Ask again, e.g. after checkout reports the discount is no longer available. */
+  refreshFirstOrderOffer: () => Promise<void>;
 
   addItem: (input: AddToCartInput) => { ok: boolean; reason?: string };
   updateQuantity: (lineId: string, quantity: number) => void;
@@ -73,8 +82,51 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const [drawerRequested, setDrawerRequested] = useState(false);
   const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [firstOrderOffer, setFirstOrderOffer] = useState<FirstOrderOffer | null>(null);
+  const offerRequest = useRef(0);
+  const pathname = usePathname();
 
   const { notify } = useToast();
+
+  const refreshFirstOrderOffer = useCallback(async () => {
+    // Only the newest answer counts: a slow earlier reply must not overwrite a later one.
+    const ticket = ++offerRequest.current;
+    try {
+      const offer = await getFirstOrderOffer();
+      if (ticket === offerRequest.current) setFirstOrderOffer(offer);
+    } catch {
+      // Not knowing means no discount shown, which is the safe side to be wrong on.
+      if (ticket === offerRequest.current) setFirstOrderOffer({ kind: "none" });
+    }
+  }, []);
+
+  const hasLines = lines.length > 0;
+
+  /*
+   * Ask the server whether this shopper has the first-order discount, once there is
+   * something in the bag to apply it to.
+   *
+   * Not on every page: it is a database query. It is asked when nothing is known yet, again
+   * while the answer is "sign in" (they may have just done so, and this provider outlives
+   * the sign-in page), and always on the bag and checkout pages, where the total is about
+   * to be paid and a stale discount would be a lie.
+   */
+  const offerKind = firstOrderOffer?.kind ?? null;
+  const askedOnPath = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!hydrated || !hasLines) return;
+
+    const onMoneyPage = pathname.startsWith("/cart") || pathname.startsWith("/checkout");
+    const unknown = offerKind === null || offerKind === "sign-in";
+    // Once per visit to a money page, not once per answer that comes back.
+    const dueHere = onMoneyPage && askedOnPath.current !== pathname;
+
+    if (!unknown && !dueHere) return;
+
+    askedOnPath.current = pathname;
+    void refreshFirstOrderOffer();
+  }, [hydrated, hasLines, pathname, offerKind, refreshFirstOrderOffer]);
 
   // Derived rather than stored: an empty bag can never sit open, and removing the
   // last line closes the drawer without an effect chasing it.
@@ -206,13 +258,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const clearCart = useCallback(() => {
     setLines([]);
     setPromoCode(null);
+    // An order has just been placed, and may have used the discount. What was true before
+    // it no longer is; forget it so the next bag asks again rather than showing a stale one.
+    offerRequest.current += 1;
+    setFirstOrderOffer(null);
+    askedOnPath.current = null;
   }, [setLines]);
 
   const subtotal = useMemo(() => merchandiseSubtotal(lines), [lines]);
   const count = useMemo(() => itemCount(lines), [lines]);
   const summary = useMemo(
-    () => orderSummary({ lines, promoCode, rules }),
-    [lines, promoCode, rules],
+    () => orderSummary({ lines, promoCode, rules, firstOrder: offerKind === "eligible" }),
+    [lines, promoCode, rules, offerKind],
   );
 
   const value = useMemo<CartContextValue>(
@@ -229,6 +286,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       closeCart,
       promoCode,
       setPromoCode,
+      firstOrderOffer,
+      refreshFirstOrderOffer,
       addItem,
       updateQuantity,
       incrementLine,
@@ -249,6 +308,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       openCart,
       closeCart,
       promoCode,
+      firstOrderOffer,
+      refreshFirstOrderOffer,
       addItem,
       updateQuantity,
       incrementLine,

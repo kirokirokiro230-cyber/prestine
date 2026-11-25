@@ -86,8 +86,8 @@ export const viewport: Viewport = {
   // Do not cap zoom — pinch-zoom is an accessibility requirement.
   maximumScale: 5,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fbf9f6" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d0c0a" },
+    { media: "(prefers-color-scheme: light)", color: "#f8f5ee" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
   ],
 };
 

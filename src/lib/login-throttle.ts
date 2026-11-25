@@ -40,20 +40,36 @@ const UNLOCKED: Lockout = { locked: false, secondsRemaining: 0 };
  * both are filtered here rather than being made the caller's problem, because "the
  * query happened to return them sorted" is not something to rely on.
  */
-export function lockoutFrom(timestamps: number[], now: number): Lockout {
+export function lockoutFrom(
+  timestamps: number[],
+  now: number,
+  /**
+   * Allowance for this key. Defaults to the sign-in limit.
+   *
+   * Only the count varies, never the window: sign-in wants five guesses in
+   * fifteen minutes, but a shopper legitimately checks several PIN codes and the
+   * confirmation page legitimately retries, so those need a higher ceiling on
+   * the same clock. Keeping one window means the stored timestamps have a single
+   * retention horizon and the table can prune itself without knowing which
+   * caller wrote a row.
+   */
+  maxAttempts: number = MAX_ATTEMPTS,
+): Lockout {
+  const limit = Math.max(1, maxAttempts);
+
   const inWindow = timestamps
     .filter((at) => now - at < WINDOW_MS)
     .sort((a, b) => a - b);
 
-  if (inWindow.length < MAX_ATTEMPTS) return UNLOCKED;
+  if (inWindow.length < limit) return UNLOCKED;
 
   /*
-   * The lock lifts when the window no longer contains MAX_ATTEMPTS failures — that is,
+   * The lock lifts when the window no longer contains `limit` failures — that is,
    * when the Nth-newest expires. Counting from the newest end rather than using the
-   * oldest entry matters once there are more than MAX_ATTEMPTS failures: the oldest may
+   * oldest entry matters once there are more than `limit` failures: the oldest may
    * be about to expire while five newer ones still hold the lock.
    */
-  const decisive = inWindow[inWindow.length - MAX_ATTEMPTS];
+  const decisive = inWindow[inWindow.length - limit];
   const remaining = decisive + WINDOW_MS - now;
 
   if (remaining <= 0) return UNLOCKED;

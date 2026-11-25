@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AccountShell } from "@/components/account/account-shell";
 import { OrderHistory } from "@/components/account/order-history";
 import { storeSettings } from "@/lib/catalog";
+import { formatReturnWindow } from "@/lib/returns";
 
 export const metadata: Metadata = {
   title: "Orders",
@@ -15,19 +17,33 @@ export default async function OrdersPage() {
   return (
     <AccountShell
       title="Orders"
-      description="Track a parcel, review what you bought, or start a return within the first 30 days."
+      description={`Track a parcel, review what you bought, or start a return within ${formatReturnWindow(
+        settings.returnWindowHours,
+      )} of delivery.`}
     >
       <OrderHistory
-        settings={{ currency: settings.currency, locale: settings.locale }}
+        settings={{
+          currency: settings.currency,
+          locale: settings.locale,
+          returnWindowHours: settings.returnWindowHours,
+        }}
       />
 
       <section className="mt-10 border-t border-line pt-8">
         <h2 className="eyebrow mb-3">Returns and exchanges</h2>
         <p className="max-w-lg text-sm leading-relaxed text-content-muted">
-          Returns are free for {settings.returnWindowDays} days from delivery. Reply to
-          your confirmation email or contact client care with your order reference and we
-          will book a collection from your door — usually the next working day. Archive
-          sale pieces are final sale.
+          You can request a return or exchange within{" "}
+          {formatReturnWindow(settings.returnWindowHours)} of delivery, subject to our{" "}
+          <Link href="/return-exchange-policy" className="link-underline text-content">
+            Return &amp; Exchange Policy
+          </Link>
+          . Once an order has been delivered, choose <em>Return items</em> on it above and
+          tell us why. Refunds go back to the payment method you paid with; for cash on
+          delivery we will ask for a UPI ID to send it to. To exchange an item, email{" "}
+          <a href="mailto:returns@kabuda.in" className="link-underline text-content">
+            returns@kabuda.in
+          </a>
+          .
         </p>
       </section>
     </AccountShell>

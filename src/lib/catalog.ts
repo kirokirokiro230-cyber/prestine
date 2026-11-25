@@ -7,8 +7,10 @@ import {
   toSummary,
 } from "./product-utils";
 import { submittedToDisplayReview } from "./review-reasons";
+import type { StyleLookCard } from "./style-looks";
 import { listSubmittedReviewsForProduct } from "@/server/repositories/reviews";
 import { listLiveBanners } from "@/server/repositories/banners";
+import { listLooksForProduct } from "@/server/repositories/looks";
 import { listActiveProducts } from "@/server/repositories/products";
 import { getSettings, listHiddenReviewIds } from "@/server/repositories/settings";
 import {
@@ -489,4 +491,55 @@ export async function relatedProducts(product: Product, limit = 4): Promise<Prod
   }
 
   return [...picked.values()].slice(0, limit);
+}
+
+/* ------------------------------------------------------------------ */
+/* Style hints                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Most looks a product page shows. A strip of thirty photographs is a gallery page. */
+const MAX_LOOKS_PER_PRODUCT = 12;
+
+/**
+ * The published styling photographs that include a product, each with every piece worn.
+ *
+ * ## Fails soft, deliberately
+ *
+ * This runs on every product page, and styling is an extra — a product page without it is
+ * still a complete product page. So any failure (the table not created yet because a
+ * migration has not been run, a database blip) is logged and answered with "no looks",
+ * never thrown. A throw here would take down every product page in the shop over a
+ * feature most of them do not use.
+ *
+ * ## Only what can be bought
+ *
+ * Products come from `allProducts`, which holds active products only, so a draft or
+ * archived piece that is still ticked in a look simply does not appear in it. A look whose
+ * every piece is unavailable is dropped, rather than opening onto an empty list.
+ */
+export async function stylingFor(product: Product): Promise<StyleLookCard[]> {
+  try {
+    const [looks, products] = await Promise.all([
+      listLooksForProduct(product.id),
+      allProducts(),
+    ]);
+
+    const byId = new Map(products.map((entry) => [entry.id, entry]));
+
+    return looks
+      .slice(0, MAX_LOOKS_PER_PRODUCT)
+      .map((look) => ({
+        id: look.id,
+        title: look.title,
+        imageUrl: look.imageUrl,
+        products: look.productIds
+          .map((id) => byId.get(id))
+          .filter((entry): entry is Product => Boolean(entry))
+          .map(toSummary),
+      }))
+      .filter((card) => card.products.length > 0);
+  } catch (error) {
+    console.error(`[styling] could not load looks for ${product.id}:`, error);
+    return [];
+  }
 }

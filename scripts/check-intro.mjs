@@ -56,8 +56,17 @@ console.log("\n— the lockup replaced the text wordmark —");
 // The mark has to exist in the header for the flight to have anywhere to land, and in
 // the footer for the brand to be consistent. Matching the rendered attribute form only,
 // so the escaped copies in the streamed payload are not counted.
+//
+// Four, not three: the home page also renders the name-origin section, which carries its
+// own turtle. This was asserting 3 from before that section existed, so it failed on a
+// page that was correct. If the count changes again, work out which surface gained or
+// lost a mark before editing the number.
 const lockups = (home.match(/viewBox="172 213 621 656"/g) ?? []).length;
-check("mark rendered in intro, header and footer", lockups === 3, `${lockups} lockups`);
+check(
+  "mark rendered in intro, header, footer and name-origin section",
+  lockups === 4,
+  `${lockups} lockups`,
+);
 
 console.log("\n— it decides before first paint —");
 // The inline script is what stops a returning visitor seeing a flash of the panel, and

@@ -49,7 +49,6 @@ export interface PurchaseSettings {
   locale: string;
   email: string;
   freeShippingThreshold: number;
-  returnWindowDays: number;
   /**
    * The same list the footer renders, so a merchant editing a delivery promise once
    * sees it change in both places. Previously this panel had its own hardcoded copy of
@@ -253,7 +252,7 @@ export function PurchasePanel({
             <p className="eyebrow">
               Size {size ? <span className="text-content">— {size}</span> : null}
             </p>
-            <SizeGuideModal system={product.sizeSystem} />
+            <SizeGuideModal system={product.sizeSystem} selectedSize={size} />
           </div>
 
           <div

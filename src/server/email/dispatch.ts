@@ -41,10 +41,14 @@ const FOR_STATUS: Record<Order["status"], EmailTemplateKey | null> = {
    */
   processing: null,
   /*
-   * "Out for delivery" fires here. There is no courier webhook, so the moment a merchant
-   * marks an order shipped is the last reliable signal we get; a separate
-   * `out_for_delivery` status would depend on someone clicking a button at the exact hour
-   * the van left, which means the email would never go out at all.
+   * "Out for delivery" fires here, which is earlier than the name suggests.
+   *
+   * `shipped` is now reached by the tracking sweep the first time Delhivery
+   * reports the parcel collected (`src/server/tracking-sync.ts`), so it means
+   * "on its way" rather than "on the van today". Keeping one email at dispatch
+   * is deliberate: Delhivery's scan codes do carry an out-for-delivery signal,
+   * but firing on it would mean a second email on every delivery attempt, and a
+   * reattempted parcel would mail the customer repeatedly.
    */
   shipped: "out-for-delivery",
   delivered: "delivered",

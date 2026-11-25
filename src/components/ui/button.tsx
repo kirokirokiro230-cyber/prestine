@@ -5,7 +5,7 @@ type Variant = "primary" | "secondary" | "outline" | "ghost" | "link" | "danger"
 type Size = "sm" | "md" | "lg" | "icon";
 
 const BASE =
-  "relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap font-medium transition-[background-color,color,border-color,opacity] duration-200 disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45";
+  "relative inline-flex select-none items-center justify-center gap-2 whitespace-nowrap font-medium transition-[background-color,color,border-color,box-shadow,transform,opacity] duration-300 ease-out focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-focus active:translate-y-px disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45";
 
 /**
  * Variants deliberately change colour and border only — never size or position —
@@ -13,20 +13,20 @@ const BASE =
  */
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-inverse text-on-inverse hover:bg-ink-700 dark:hover:bg-bone-300 active:bg-ink-800 dark:active:bg-bone-400",
+    "bg-accent text-on-accent shadow-sm hover:bg-accent-hover hover:shadow-md",
   secondary:
-    "bg-surface-sunken text-content hover:bg-stone-200 dark:hover:bg-ink-700 border border-line",
+    "border border-line bg-surface-raised text-content shadow-xs hover:border-line-strong hover:bg-surface-sunken",
   outline:
-    "border border-ink-900 dark:border-bone-200 text-content hover:bg-inverse hover:text-on-inverse",
-  ghost: "text-content hover:bg-surface-sunken",
-  link: "link-underline text-content px-0 h-auto",
-  danger: "bg-danger-500 text-white hover:bg-danger-700",
+    "border border-content/35 bg-transparent text-content hover:border-accent hover:bg-accent-soft hover:text-accent",
+  ghost: "text-content hover:bg-accent-soft hover:text-accent",
+  link: "link-underline text-content px-0 h-auto hover:text-accent",
+  danger: "bg-danger-500 text-white shadow-sm hover:bg-danger-700 hover:shadow-md",
 };
 
 const SIZES: Record<Size, string> = {
-  sm: "h-9 px-4 text-xs tracking-[0.08em] uppercase",
-  md: "h-11 px-6 text-xs tracking-[0.1em] uppercase",
-  lg: "h-14 px-8 text-sm tracking-[0.1em] uppercase",
+  sm: "h-10 px-4 text-[0.6875rem] tracking-[0.12em] uppercase",
+  md: "h-12 px-6 text-[0.6875rem] tracking-[0.13em] uppercase",
+  lg: "h-14 px-8 text-xs tracking-[0.13em] uppercase",
   // 44px minimum touch target for icon-only controls.
   icon: "size-11 shrink-0",
 };
@@ -60,7 +60,7 @@ export function Button({
         VARIANTS[variant],
         SIZES[size],
         block && "w-full",
-        variant !== "link" && "rounded-xs",
+        variant !== "link" && "rounded-full",
         className,
       )}
       {...props}
@@ -89,7 +89,7 @@ export function ButtonLink({
         VARIANTS[variant],
         SIZES[size],
         block && "w-full",
-        variant !== "link" && "rounded-xs",
+        variant !== "link" && "rounded-full",
         className,
       )}
       {...props}

@@ -44,15 +44,41 @@ const BASE_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-  /**
-   * Nobody may frame this site. Stops clickjacking, where an attacker loads a page
-   * in an invisible iframe over their own UI and harvests the clicks.
-   * `frame-ancestors` is the modern form; X-Frame-Options is kept for old browsers
-   * that ignore CSP.
-   */
   { key: "X-Frame-Options", value: "DENY" },
-  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
 ];
+
+/**
+ * CSP, built separately from `BASE_HEADERS` because it differs between dev and
+ * production rather than only being added/removed like `HSTS` below.
+ *
+ * `frame-ancestors 'none'` stops clickjacking (nobody may frame this site) and is
+ * safe unconditionally. `script-src`/`connect-src`/`frame-src` additionally allow
+ * Cashfree's own domains for checkout — its script (`sdk.cashfree.com`) calls out
+ * to `api.cashfree.com`, and the hosted payment page itself is framed from
+ * `sandbox.cashfree.com` (test) or `payments.cashfree.com` (live). Per Cashfree's
+ * own CSP guidance for Cashfree.js: without these, a strict CSP can block the
+ * payment script or the hosted checkout with no error a shopper (or a support
+ * ticket) would ever surface as "the CSP did it".
+ *
+ * `'unsafe-eval'` is included **only in development**: Next/React's own dev-mode
+ * tooling (source-mapped stack traces, Fast Refresh) calls `eval()`, and a
+ * `script-src` with no `'unsafe-eval'` breaks that outright — visible as `eval()
+ * is not supported in this environment` in the console, not as anything related
+ * to Cashfree. React's own docs are explicit that production builds never call
+ * `eval()`, so production keeps the tighter policy.
+ */
+function contentSecurityPolicy(production: boolean): string {
+  return [
+    "frame-ancestors 'none'",
+    `script-src 'self' 'unsafe-inline' ${production ? "" : "'unsafe-eval' "}https://sdk.cashfree.com`,
+    // `sdk.cashfree.com` here too: the SDK script fetches its own sourcemap
+    // (`cashfree.js.map`) via a request that `connect-src` governs, not `script-src`
+    // — omitting it blocks that fetch outright and breaks the whole SDK load, not
+    // merely dev-mode debugging.
+    "connect-src 'self' https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com",
+    "frame-src https://sdk.cashfree.com https://api.cashfree.com https://sandbox.cashfree.com https://payments.cashfree.com https://payments-test.cashfree.com",
+  ].join("; ");
+}
 
 /**
  * HSTS. Tells browsers to refuse plain HTTP to this host for a year, which closes
@@ -149,13 +175,27 @@ const nextConfig: NextConfig = {
      */
     dangerouslyAllowLocalIP: process.env.NODE_ENV !== "production",
   },
+  /**
+   * Pages that no longer exist, sent to what replaced them.
+   *
+   * `/shipping-returns` became three policy pages; its returns half is the closest match and
+   * the shipping half is one link away from there. `/accessibility` was removed with the rest
+   * of the template text. Permanent, so search engines and old bookmarks update.
+   */
+  async redirects() {
+    return [
+      { source: "/shipping-returns", destination: "/return-exchange-policy", permanent: true },
+      { source: "/accessibility", destination: "/", permanent: true },
+    ];
+  },
   async headers() {
     const production = process.env.NODE_ENV === "production";
+    const csp = { key: "Content-Security-Policy", value: contentSecurityPolicy(production) };
 
     return [
       {
         source: "/(.*)",
-        headers: production ? [...BASE_HEADERS, HSTS] : BASE_HEADERS,
+        headers: production ? [...BASE_HEADERS, csp, HSTS] : [...BASE_HEADERS, csp],
       },
       {
         source: "/admin/:path*",

@@ -23,7 +23,8 @@ export const site = {
   freeShippingThreshold: 20000,
   /** Flat sales-tax rate applied at checkout. */
   taxRate: 0.08,
-  returnWindowDays: 30,
+  // 7 calendar days, matching the published Return & Exchange Policy.
+  returnWindowHours: 168,
   social: {
     instagram: "https://instagram.com",
     pinterest: "https://pinterest.com",
@@ -191,7 +192,7 @@ export const emailTemplates: EmailTemplate[] = [
     body: [
       "Order {{orderId}} has been delivered. We hope it was worth the wait.",
       "{{itemLines}}",
-      "If anything is not right — the fit, the colour, a fault — reply to this email and we will sort it out. Returns are free for {{returnWindowDays}} days.",
+      "If anything is not right — the fit, the colour, a fault — reply to this email and we will sort it out. You can request a return or exchange within {{returnWindow}} of delivery.",
     ].join("\n\n"),
   },
   {
@@ -212,7 +213,7 @@ export const emailTemplates: EmailTemplate[] = [
     subject: "Your order {{orderId}} has been cancelled",
     heading: "Your order is cancelled.",
     body: [
-      "Order {{orderId}} has been cancelled and nothing further will be charged. Any payment already taken is refunded to the original method within three working days.",
+      "Order {{orderId}} has been cancelled and nothing further will be charged. Any payment already taken is refunded to the original payment method. Approved refunds are initiated within 5–7 business days, and your bank or payment provider may take additional time to show it.",
       "{{cancellationReason}}",
       "If this was not what you expected, reply to this email and we will look into it.",
     ].join("\n\n"),
@@ -234,31 +235,3 @@ export const sortOptions: Array<{ value: SortKey; label: string }> = [
   { value: "rating", label: "Top rated" },
   { value: "name-asc", label: "Alphabetical" },
 ];
-
-/** Size guide tables, keyed by size system. Measurements in inches. */
-export const sizeGuides = {
-  alpha: {
-    label: "Tops, knitwear & outerwear",
-    columns: ["Size", "Chest", "Waist", "Hip", "Sleeve"],
-    rows: [
-      ["XS", '33–34"', '27–28"', '34–35"', '32"'],
-      ["S", '35–37"', '29–31"', '36–38"', '32.5"'],
-      ["M", '38–40"', '32–34"', '39–41"', '33"'],
-      ["L", '41–43"', '35–37"', '42–44"', '33.5"'],
-      ["XL", '44–46"', '38–40"', '45–47"', '34"'],
-      ["XXL", '47–49"', '41–43"', '48–50"', '34.5"'],
-    ],
-  },
-  waist: {
-    label: "Trousers & denim",
-    columns: ["Size", "Waist", "Hip", "Inseam", "Leg opening"],
-    rows: [
-      ["28", '28"', '35"', '30"', '6.5"'],
-      ["30", '30"', '37"', '30"', '6.75"'],
-      ["32", '32"', '39"', '32"', '7"'],
-      ["34", '34"', '41"', '32"', '7.25"'],
-      ["36", '36"', '43"', '32"', '7.5"'],
-      ["38", '38"', '45"', '34"', '7.75"'],
-    ],
-  },
-} as const;

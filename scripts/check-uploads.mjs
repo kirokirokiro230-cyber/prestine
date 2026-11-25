@@ -1,22 +1,47 @@
 /**
- * Verifies uploaded images are actually served, safely.
+ * Verifies uploaded images actually reach Supabase Storage and are served, safely.
  *
- * Uploads are not in `public/` — they are merchant content, and `public/` is build
- * input — so a route handler serves them. That route is the part no unit test covers,
- * and the failures are the kind you only find in production: images 404 in the running
- * server, or worse, the route hands out files outside its directory.
+ * Uploads used to go to a local `data/uploads/` directory served by this app's own
+ * route handler — that handler is gone. Every image now goes straight to the
+ * Supabase Storage bucket named by `SUPABASE_STORAGE_BUCKET`, served from Supabase's
+ * own CDN. This script checks that boundary instead: that a real image upload
+ * succeeds, that its public URL actually serves the same bytes back, and that the
+ * bucket refuses to serve something that was never uploaded.
  *
- * Writes a real PNG into the uploads directory under the content-hash name the server
- * would give it, then asks the running server for it.
+ * Usage: node scripts/check-uploads.mjs
  *
- * Usage: node scripts/check-uploads.mjs [baseUrl]
+ * Reads SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET from
+ * .env.local/.env.
  */
 import { createHash } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-const base = process.argv[2] ?? "http://localhost:4136";
-const dir = process.env.PRESTINE_UPLOAD_DIR ?? path.join(process.cwd(), "data", "uploads");
+for (const file of [".env.local", ".env"]) {
+  const path = join(process.cwd(), file);
+  if (!existsSync(path)) continue;
+
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = trimmed.slice(eq + 1).trim();
+  }
+}
+
+const url = process.env.SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const bucket = process.env.SUPABASE_STORAGE_BUCKET;
+
+if (!url || !serviceRoleKey || !bucket) {
+  console.error(
+    "SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET must all be set.",
+  );
+  process.exit(1);
+}
 
 let failures = 0;
 
@@ -33,76 +58,51 @@ const png = Buffer.from(
 );
 
 const digest = createHash("sha256").update(png).digest("hex").slice(0, 16);
-const name = `${digest}.png`;
+const name = `check-uploads/${digest}.png`;
 
-await mkdir(dir, { recursive: true });
-await writeFile(path.join(dir, name), png);
-
-// A file the route must never serve, sitting right next to the ones it should.
-const decoy = path.join(dir, "secret.txt");
-await writeFile(decoy, "should never be served");
+const storageUrl = `${url}/storage/v1`;
+const headers = {
+  apikey: serviceRoleKey,
+  Authorization: `Bearer ${serviceRoleKey}`,
+};
 
 try {
-  console.log("— a stored image is served —");
-  const image = await fetch(`${base}/uploads/${name}`);
-  check("200 OK", image.status === 200, `status ${image.status}`);
-  check("correct content type", image.headers.get("content-type") === "image/png");
+  console.log("— uploading a real image to the bucket —");
+  const upload = await fetch(`${storageUrl}/object/${bucket}/${name}`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "image/png", "x-upsert": "true" },
+    body: png,
+  });
+  check("upload accepted", upload.ok, `status ${upload.status}`);
+
+  console.log("\n— the public URL serves the same bytes —");
+  const publicUrl = `${storageUrl}/object/public/${bucket}/${name}`;
+  const served = await fetch(publicUrl);
+  check("200 OK", served.status === 200, `status ${served.status}`);
   check(
-    "cached permanently",
-    /immutable/.test(image.headers.get("cache-control") ?? ""),
-    image.headers.get("cache-control") ?? "none",
+    "correct content type",
+    (served.headers.get("content-type") ?? "").startsWith("image/png"),
+    served.headers.get("content-type") ?? "none",
   );
-  // The name is a content hash, so a URL can never point at different bytes — which is
-  // what makes permanent caching safe rather than reckless.
-  check("sniffing disabled", image.headers.get("x-content-type-options") === "nosniff");
-  check("bytes match", Buffer.from(await image.arrayBuffer()).equals(png));
+  check("bytes match", Buffer.from(await served.arrayBuffer()).equals(png));
 
-  console.log("\n— nothing else is —");
-  // Every one of these is a real attempt someone will make.
-  const refused = [
-    ["a name that is not a content hash", "secret.txt"],
-    ["an SVG extension", `${digest}.svg`],
-    ["upper-case hex", `${digest.toUpperCase()}.png`],
-    ["a double extension", `${name}.exe`],
-    ["a query string smuggled into the name", `${name}%3Fx=1`],
-    ["encoded traversal", "..%2Fstore.json"],
-    ["double-encoded traversal", "..%252Fstore.json"],
-    ["an absolute path", "%2Fetc%2Fpasswd"],
-    ["a missing file", "00112233445566aa.png"],
-  ];
+  console.log("\n— a name that was never uploaded is not served —");
+  const missing = await fetch(`${storageUrl}/object/public/${bucket}/check-uploads/nonexistent.png`);
+  check("404 for a missing object", missing.status === 404 || missing.status === 400, `status ${missing.status}`);
 
-  for (const [label, segment] of refused) {
-    const response = await fetch(`${base}/uploads/${segment}`);
-    check(`refuses ${label}`, response.status === 404, `status ${response.status}`);
-  }
-
+  console.log("\n— bucket rejects an SVG under the app's own upload path (defence in depth) —");
   /*
-   * A literal `..` is handled separately, because it never reaches the route: URL parsing
-   * resolves it away before the request is sent, so `/uploads/..` is a request for `/`
-   * and answers with the home page. Asserting a 404 there would be asserting a fiction.
-   * What matters is that it cannot yield a file, so that is what is checked.
+   * Supabase Storage itself does not sniff content — `saveImage()`
+   * (src/server/uploads.ts) is what refuses SVG and forges bytes against the
+   * declared type before anything reaches the bucket. This check exists to remind
+   * whoever edits that function that the bucket will happily store whatever it is
+   * told to, so the sniffing has to stay in application code — there is nothing
+   * here to catch a regression there.
    */
-  console.log("\n— a literal `..` resolves away rather than serving anything —");
-  const dotdot = await fetch(`${base}/uploads/..`);
-  check(
-    "not served as an image",
-    !(dotdot.headers.get("content-type") ?? "").startsWith("image/"),
-    dotdot.headers.get("content-type") ?? "none",
-  );
-
-  console.log("\n— the store itself is unreachable through the route —");
-  for (const attempt of ["../store.json", "..%2F..%2Fdata%2Fstore.json"]) {
-    const response = await fetch(`${base}/uploads/${attempt}`);
-    const body = await response.text();
-    check(
-      `no store contents via ${attempt}`,
-      !body.includes("\"products\"") && !body.includes("passwordHash"),
-      `status ${response.status}`,
-    );
-  }
+  console.log("  (skipped: the bucket has no content sniffing of its own by design — see saveImage())");
 } finally {
-  await rm(path.join(dir, name), { force: true });
-  await rm(decoy, { force: true });
+  console.log("\n— cleaning up —");
+  await fetch(`${storageUrl}/object/${bucket}/${name}`, { method: "DELETE", headers });
 }
 
 console.log(

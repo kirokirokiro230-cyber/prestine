@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { asc, eq, sql } from "drizzle-orm";
 import { bannerState, type BannerState } from "@/lib/banners";
 import type { Banner } from "@/lib/types";
 import { isUploadedImage } from "@/lib/uploads";
-import { getDb, isDatabaseConfigured } from "../db/client";
-import { fromBanner, toBanner } from "../db/mappers";
-import { banners as bannersTable } from "../db/schema";
-import { mutateStore, readStore } from "../store";
+import { callRpc, db, insertInto, unwrap, updateTable } from "../supabase";
+import type { BannerRow } from "../database.types";
 
 /**
  * Home-page hero slides.
@@ -14,28 +11,53 @@ import { mutateStore, readStore } from "../store";
  * Two reads, deliberately separate: `listBanners` returns everything for the admin
  * table, `listLiveBanners` returns only what a shopper should see right now. Keeping
  * the schedule and active checks in one place means no page can forget them.
- *
- * Two backends, chosen by whether a database is configured — see `login-attempts.ts`
- * for the precedent.
  */
 
-export async function listBanners(): Promise<Banner[]> {
-  if (!isDatabaseConfigured()) {
-    const { banners } = await readStore();
-    return [...banners].sort((a, b) => a.position - b.position);
-  }
+function fromRow(row: BannerRow): Banner {
+  return {
+    id: row.id,
+    eyebrow: row.eyebrow ?? undefined,
+    heading: row.heading,
+    body: row.body ?? undefined,
+    ctaLabel: row.cta_label ?? undefined,
+    ctaHref: row.cta_href ?? undefined,
+    imageUrl: row.image_url ?? undefined,
+    imageUrlMobile: row.image_url_mobile ?? undefined,
+    imageUrlTablet: row.image_url_tablet ?? undefined,
+    imageAlt: row.image_alt ?? undefined,
+    accentHex: row.accent_hex ?? undefined,
+    textTone: row.text_tone,
+    align: row.align,
+    active: row.active,
+    position: row.position,
+    startsAt: row.starts_at ?? undefined,
+    endsAt: row.ends_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
-  const rows = await getDb().select().from(bannersTable).orderBy(asc(bannersTable.position));
-  return rows.map(toBanner);
+export async function listBanners(): Promise<Banner[]> {
+  const rows = unwrap(
+    await db()
+      .from("banners")
+      .select("*")
+      .order("position", { ascending: true })
+      .overrideTypes<BannerRow[], { merge: false }>(),
+  );
+  return rows.map(fromRow);
 }
 
 export async function getBanner(id: string): Promise<Banner | undefined> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).banners.find((banner) => banner.id === id);
-  }
-
-  const [row] = await getDb().select().from(bannersTable).where(eq(bannersTable.id, id));
-  return row ? toBanner(row) : undefined;
+  const row = unwrap(
+    await db()
+      .from("banners")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle()
+      .overrideTypes<BannerRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 /**
@@ -145,153 +167,84 @@ function clean(value: string | undefined): string | undefined {
 
 function normalise(input: BannerInput) {
   return {
-    eyebrow: clean(input.eyebrow),
+    eyebrow: clean(input.eyebrow) ?? null,
     heading: input.heading.trim(),
-    body: clean(input.body),
-    ctaLabel: clean(input.ctaLabel),
-    ctaHref: clean(input.ctaHref),
-    imageUrl: clean(input.imageUrl),
-    imageUrlMobile: clean(input.imageUrlMobile),
-    imageUrlTablet: clean(input.imageUrlTablet),
-    imageAlt: clean(input.imageAlt),
-    accentHex: clean(input.accentHex),
-    textTone: input.textTone,
+    body: clean(input.body) ?? null,
+    cta_label: clean(input.ctaLabel) ?? null,
+    cta_href: clean(input.ctaHref) ?? null,
+    image_url: clean(input.imageUrl) ?? null,
+    image_url_mobile: clean(input.imageUrlMobile) ?? null,
+    image_url_tablet: clean(input.imageUrlTablet) ?? null,
+    image_alt: clean(input.imageAlt) ?? null,
+    accent_hex: clean(input.accentHex) ?? null,
+    text_tone: input.textTone,
     align: input.align,
     active: input.active,
-    startsAt: clean(input.startsAt),
-    endsAt: clean(input.endsAt),
+    starts_at: clean(input.startsAt) ?? null,
+    ends_at: clean(input.endsAt) ?? null,
   };
 }
 
 export async function createBanner(input: BannerInput): Promise<Banner> {
   assertValid(input);
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const now = new Date().toISOString();
-      const highest = store.banners.reduce(
-        (max, banner) => Math.max(max, banner.position),
-        -1,
-      );
+  const existing = unwrap(
+    await db()
+      .from("banners")
+      .select("position")
+      .overrideTypes<Array<Pick<BannerRow, "position">>, { merge: false }>(),
+  );
+  const highest = existing.reduce((max, row) => Math.max(max, row.position), -1);
 
-      const banner: Banner = {
-        id: `ban_${randomUUID().slice(0, 8)}`,
-        ...normalise(input),
-        // New slides go last, so creating one never reorders what is already live.
-        position: highest + 1,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      store.banners.push(banner);
-      return banner;
-    });
-  }
-
-  return getDb().transaction(async (tx) => {
-    const now = new Date().toISOString();
-    const [{ highest }] = await tx
-      .select({ highest: sql<number>`coalesce(max(${bannersTable.position}), -1)` })
-      .from(bannersTable);
-
-    const banner: Banner = {
+  const row = unwrap(
+    await insertInto(db(), "banners", {
       id: `ban_${randomUUID().slice(0, 8)}`,
       ...normalise(input),
+      // New slides go last, so creating one never reorders what is already live.
       position: highest + 1,
-      createdAt: now,
-      updatedAt: now,
-    };
+    })
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as BannerRow;
 
-    await tx.insert(bannersTable).values(fromBanner(banner));
-    return banner;
-  });
+  return fromRow(row);
 }
 
 export async function updateBanner(id: string, input: BannerInput): Promise<Banner> {
   assertValid(input);
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const index = store.banners.findIndex((banner) => banner.id === id);
-      if (index === -1) throw new Error(`Banner ${id} not found`);
+  const row = unwrap(
+    await updateTable(db(), "banners", normalise(input))
+      .eq("id", id)
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as BannerRow | null;
 
-      const next: Banner = {
-        ...store.banners[index],
-        ...normalise(input),
-        id,
-        updatedAt: new Date().toISOString(),
-      };
-
-      store.banners[index] = next;
-      return next;
-    });
-  }
-
-  return getDb().transaction(async (tx) => {
-    const [current] = await tx.select().from(bannersTable).where(eq(bannersTable.id, id));
-    if (!current) throw new Error(`Banner ${id} not found`);
-
-    const next: Banner = {
-      ...toBanner(current),
-      ...normalise(input),
-      id,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await tx.update(bannersTable).set(fromBanner(next)).where(eq(bannersTable.id, id));
-    return next;
-  });
+  if (!row) throw new Error(`Banner ${id} not found`);
+  return fromRow(row);
 }
 
 export async function deleteBanner(id: string): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      store.banners = store.banners.filter((banner) => banner.id !== id);
-      // Close the gap so positions stay contiguous and reordering keeps working.
-      store.banners
-        .sort((a, b) => a.position - b.position)
-        .forEach((banner, index) => {
-          banner.position = index;
-        });
-    });
-    return;
-  }
-
-  await getDb().transaction(async (tx) => {
-    await tx.delete(bannersTable).where(eq(bannersTable.id, id));
-
-    // Close the gap so positions stay contiguous and reordering keeps working.
-    const remaining = await tx
-      .select({ id: bannersTable.id })
-      .from(bannersTable)
-      .orderBy(asc(bannersTable.position));
-    for (const [index, row] of remaining.entries()) {
-      await tx.update(bannersTable).set({ position: index }).where(eq(bannersTable.id, row.id));
-    }
-  });
+  // Closes the position gap so the remaining slides stay contiguous and
+  // reordering keeps working — see delete_banner_and_close_gap() in
+  // supabase/migrations/00000000000003_functions.sql.
+  const { error } = await callRpc(db(), "delete_banner_and_close_gap", { p_id: id });
+  if (error) throw new Error(error.message);
 }
 
 export async function setBannerActive(id: string, active: boolean): Promise<Banner> {
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const banner = store.banners.find((entry) => entry.id === id);
-      if (!banner) throw new Error(`Banner ${id} not found`);
+  const row = unwrap(
+    await updateTable(db(), "banners", { active })
+      .eq("id", id)
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as BannerRow | null;
 
-      banner.active = active;
-      banner.updatedAt = new Date().toISOString();
-      return banner;
-    });
-  }
-
-  const db = getDb();
-  const updatedAt = new Date().toISOString();
-  const [row] = await db
-    .update(bannersTable)
-    .set({ active, updatedAt: new Date(updatedAt) })
-    .where(eq(bannersTable.id, id))
-    .returning();
   if (!row) throw new Error(`Banner ${id} not found`);
-  return toBanner(row);
+  return fromRow(row);
 }
 
 /**
@@ -302,36 +255,22 @@ export async function setBannerActive(id: string, active: boolean): Promise<Bann
  * only one that is keyboard accessible for free.
  */
 export async function moveBanner(id: string, direction: "up" | "down"): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      const ordered = [...store.banners].sort((a, b) => a.position - b.position);
-      const index = ordered.findIndex((banner) => banner.id === id);
-      if (index === -1) return;
+  const ordered = await listBanners();
+  const index = ordered.findIndex((banner) => banner.id === id);
+  if (index === -1) return;
 
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= ordered.length) return;
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= ordered.length) return;
 
-      const positionA = ordered[index].position;
-      ordered[index].position = ordered[target].position;
-      ordered[target].position = positionA;
-    });
-    return;
-  }
+  const positionA = ordered[index].position;
+  const positionB = ordered[target].position;
 
-  await getDb().transaction(async (tx) => {
-    const ordered = await tx
-      .select({ id: bannersTable.id, position: bannersTable.position })
-      .from(bannersTable)
-      .orderBy(asc(bannersTable.position));
-    const index = ordered.findIndex((banner) => banner.id === id);
-    if (index === -1) return;
-
-    const target = direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= ordered.length) return;
-
-    const positionA = ordered[index].position;
-    const positionB = ordered[target].position;
-    await tx.update(bannersTable).set({ position: positionB }).where(eq(bannersTable.id, ordered[index].id));
-    await tx.update(bannersTable).set({ position: positionA }).where(eq(bannersTable.id, ordered[target].id));
-  });
+  // Two updates, not a transaction: the worst outcome of one succeeding and
+  // the other failing is two slides briefly sharing a position, which the
+  // next read simply re-sorts around — nothing is lost, and it self-heals on
+  // the next successful move. Not worth a dedicated RPC for that risk profile.
+  await Promise.all([
+    updateTable(db(), "banners", { position: positionB }).eq("id", ordered[index].id),
+    updateTable(db(), "banners", { position: positionA }).eq("id", ordered[target].id),
+  ]);
 }

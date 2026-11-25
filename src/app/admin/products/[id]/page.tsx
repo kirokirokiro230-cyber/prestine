@@ -4,9 +4,13 @@ import { notFound } from "next/navigation";
 import { CaretLeft } from "@phosphor-icons/react/dist/ssr";
 import { deleteProductAction } from "@/app/admin/actions/products";
 import { ProductForm } from "@/components/admin/product-form";
+import { ProductStylePanel } from "@/components/admin/product-style-panel";
+import type { PickerProduct } from "@/components/admin/product-picker";
 import { ConfirmSubmit, FormFeedback, Panel } from "@/components/admin/primitives";
 import { formatDate } from "@/lib/format";
+import type { StyleLook } from "@/lib/style-looks";
 import { auditFor } from "@/server/audit";
+import { listLooks } from "@/server/repositories/looks";
 import { getProduct, listProducts } from "@/server/repositories/products";
 import { getSettings } from "@/server/repositories/settings";
 import { listCategories, listCollections } from "@/server/repositories/taxonomy";
@@ -44,6 +48,38 @@ export default async function EditProductPage({
     auditFor("product", id),
   ]);
 
+  /*
+   * This product's own style photographs. Loaded defensively: the product editor is core,
+   * and styling is an extra. If the tables are missing (a migration not run) or the query
+   * fails, the panel is left out and the rest of the page works — a failure here must not
+   * stop anyone editing a price.
+   */
+  let styleLooks: StyleLook[] = [];
+  let otherStyleLooks = 0;
+  let stylingAvailable = true;
+
+  try {
+    const all = await listLooks();
+    styleLooks = all.filter((look) => look.shownOn.includes(id));
+    otherStyleLooks = all.filter(
+      (look) => look.productIds.includes(id) && !look.shownOn.includes(id),
+    ).length;
+  } catch (error) {
+    stylingAvailable = false;
+    console.error(`[styling] could not load style hints for ${id}:`, error);
+  }
+
+  const pickable: PickerProduct[] = products
+    .map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      category: candidate.category,
+      // Optional on the type; the column defaults to 'active', so absent means published.
+      status: candidate.status ?? "active",
+      image: candidate.colors[0]?.images?.[0],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -76,6 +112,15 @@ export default async function EditProductPage({
           .map((candidate) => ({ slug: candidate.slug, name: candidate.name }))}
         currency={settings.currency}
       />
+
+      {stylingAvailable ? (
+        <ProductStylePanel
+          productId={product.id}
+          looks={styleLooks}
+          otherCount={otherStyleLooks}
+          products={pickable}
+        />
+      ) : null}
 
       {history.length > 0 ? (
         <Panel title="History" description="Changes recorded against this product.">

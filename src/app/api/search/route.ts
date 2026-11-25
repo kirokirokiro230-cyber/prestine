@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchProducts } from "@/lib/catalog";
+import { LIMITS, consumeIpRateLimit, rateLimitMessage } from "@/server/rate-limit";
 
 /**
  * Typeahead search endpoint.
@@ -31,6 +32,19 @@ export async function GET(request: Request) {
 
   if (query.trim().length < 2) {
     return NextResponse.json({ query, results: [] as SearchResultItem[] });
+  }
+
+  /*
+   * This is a typeahead, so it fires per keystroke — hence the high allowance
+   * and the short-query early return above, which keeps the cheapest calls from
+   * consuming it at all.
+   */
+  const limited = await consumeIpRateLimit("public-read", LIMITS.publicRead);
+  if (limited) {
+    return NextResponse.json(
+      { error: rateLimitMessage(limited) },
+      { status: 429, headers: { "Retry-After": String(limited.secondsRemaining) } },
+    );
   }
 
   const matches = await searchProducts(query, limit);

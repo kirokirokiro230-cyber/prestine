@@ -64,16 +64,18 @@ interface Particle {
  * Build the particles.
  *
  * Colours are theme tokens rather than literals, so a merchant who changes the accent gets
- * confetti that matches instead of confetti that clashes. Five of them, so the burst reads
- * as intentional rather than as a bag of sweets.
+ * confetti that matches instead of confetti that clashes. Five shades of the one accent
+ * plus black and cream — the theme is strictly monochrome, so `warning-500`
+ * (now a flat grey, used for status text elsewhere) has no place in a burst that is meant
+ * to read as a celebration in the brand colour, not a status indicator.
  */
 function makeParticles(): Particle[] {
   const palette = [
     "var(--color-accent)",
-    "var(--color-success-500)",
-    "var(--color-warning-500)",
     "var(--color-clay-300)",
     "var(--color-clay-500)",
+    "var(--color-clay-700)",
+    "var(--color-ink-900)",
   ];
 
   return Array.from({ length: PARTICLE_COUNT }, (_, id) => {

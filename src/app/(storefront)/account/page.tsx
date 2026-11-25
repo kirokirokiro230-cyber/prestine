@@ -11,7 +11,7 @@ import {
 import { signOut } from "@/app/actions/customer-auth";
 import { AccountShell } from "@/components/account/account-shell";
 import { Button, ButtonLink } from "@/components/ui/button";
-import { site } from "@/lib/config";
+
 import { currentCustomer } from "@/server/customer-session";
 
 export const metadata: Metadata = {
@@ -41,6 +41,21 @@ const CARDS = [
   },
 ];
 
+/**
+ * Up to two initials from a name.
+ *
+ * First and last word rather than the first two, so "Aliasgar Hussain Agharia"
+ * reads AA like the person would write it. Falls back to a single letter for a
+ * one-word name, and to nothing at all rather than rendering a stray character
+ * for an empty one.
+ */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  if (words.length === 1) return words[0].slice(0, 1).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
 export default async function AccountPage() {
   const customer = await currentCustomer();
 
@@ -51,13 +66,30 @@ export default async function AccountPage() {
     >
       {customer ? (
         <section className="border border-line bg-surface p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="font-sans text-sm font-medium">Welcome back, {customer.name}</h2>
-              <p className="mt-1.5 max-w-md text-sm leading-relaxed text-content-muted">
-                Signed in with {customer.phone}.
-              </p>
+          <div className="flex flex-wrap items-center justify-between gap-5">
+            <div className="flex min-w-0 items-center gap-4">
+              {/*
+                Initials rather than an avatar upload. There is no profile photo
+                in this build, and a generic silhouette icon says nothing — two
+                letters at least belong to the person looking at them.
+              */}
+              <span
+                aria-hidden
+                className="grid size-12 shrink-0 place-items-center rounded-full bg-inverse font-sans text-sm font-medium text-on-inverse"
+              >
+                {initials(customer.name)}
+              </span>
+
+              <div className="min-w-0">
+                <h2 className="truncate font-sans text-base font-medium">
+                  {customer.name}
+                </h2>
+                <p data-numeric className="mt-0.5 text-sm text-content-muted">
+                  {customer.phone}
+                </p>
+              </div>
             </div>
+
             <form action={signOut}>
               <Button type="submit" variant="outline" size="sm">
                 <SignOut size={14} aria-hidden />
@@ -89,26 +121,30 @@ export default async function AccountPage() {
         </section>
       )}
 
-      <ul className="mt-6 grid gap-4 sm:grid-cols-3">
+      <ul className="mt-4 grid gap-4 sm:grid-cols-3">
         {CARDS.map(({ href, icon: Icon, title, body }) => (
           <li key={href}>
+            {/*
+              The whole card is the link, and the arrow moves on hovering any
+              part of it — a small "Open" affordance that only responded to its
+              own four words made the rest of the card feel inert.
+            */}
             <Link
               href={href}
-              className="group flex h-full flex-col border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+              className="group flex h-full flex-col border border-line bg-surface p-5 transition-colors hover:border-line-strong hover:bg-surface-sunken"
             >
-              <Icon size={20} aria-hidden className="text-content-muted" />
+              <span className="flex items-center justify-between">
+                <Icon size={20} aria-hidden className="text-content-muted" />
+                <ArrowRight
+                  size={14}
+                  aria-hidden
+                  className="text-content-subtle transition-transform duration-300 group-hover:translate-x-1 group-hover:text-content"
+                />
+              </span>
               <h2 className="mt-4 font-sans text-sm font-medium">{title}</h2>
               <p className="mt-1.5 flex-1 text-xs leading-relaxed text-content-muted">
                 {body}
               </p>
-              <span className="mt-4 inline-flex items-center gap-1.5 text-2xs uppercase tracking-[0.12em] text-content">
-                <span className="link-underline">Open</span>
-                <ArrowRight
-                  size={12}
-                  aria-hidden
-                  className="transition-transform duration-300 group-hover:translate-x-1"
-                />
-              </span>
             </Link>
           </li>
         ))}
@@ -117,18 +153,11 @@ export default async function AccountPage() {
       <section className="mt-10 border-t border-line pt-8">
         <h2 className="eyebrow mb-3">Need a hand?</h2>
         <p className="max-w-lg text-sm leading-relaxed text-content-muted">
-          Client care is staffed by people who have handled the clothes. Email{" "}
-          <a href={`mailto:${site.email}`} className="link-underline text-content">
-            {site.email}
-          </a>{" "}
-          or call{" "}
-          <a
-            href={`tel:${site.phone.replace(/\s/g, "")}`}
-            className="link-underline text-content"
-          >
-            {site.phone}
-          </a>
-          , weekdays 9am–6pm GMT. We answer most emails within a couple of hours.
+          For help with an order, contact our customer support team on the{" "}
+          <Link href="/contact" className="link-underline text-content">
+            Contact Us
+          </Link>{" "}
+          page, and keep your order number ready.
         </p>
       </section>
     </AccountShell>

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { ArrowsOut, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
+import { useHorizontalSwipe } from "@/hooks/use-horizontal-swipe";
 import { useResetOnChange } from "@/hooks/use-store";
 import { primaryBadge } from "@/lib/product-utils";
 import type { ProductColor, ProductSummary } from "@/lib/types";
@@ -30,7 +31,7 @@ export function ProductGallery({
 }) {
   const [index, setIndex] = useState(0);
   const [zoomOpen, setZoomOpen] = useState(false);
-  const viewCount = color.images?.length ?? VIEW_LABELS.length;
+  const viewCount = Math.max(color.images?.length ?? VIEW_LABELS.length, 1);
 
   // Changing colour returns to the front view, so the shopper is never left
   // looking at a detail crop of a colour they did not choose.
@@ -42,6 +43,12 @@ export function ProductGallery({
     },
     [viewCount],
   );
+
+  const swipeHandlers = useHorizontalSwipe({
+    enabled: viewCount > 1,
+    onSwipeLeft: () => go(index + 1),
+    onSwipeRight: () => go(index - 1),
+  });
 
   const badge = primaryBadge(product);
 
@@ -76,10 +83,10 @@ export function ProductGallery({
               aria-label={`Show ${VIEW_LABELS[i] ?? `image ${i + 1}`} view`}
               aria-pressed={i === index}
               className={cn(
-                "relative w-16 shrink-0 overflow-hidden bg-surface-sunken transition-[outline] lg:w-full",
+                "relative w-16 shrink-0 overflow-hidden rounded-xl border bg-surface-sunken shadow-xs transition-[border-color,box-shadow,opacity] lg:w-full",
                 i === index
-                  ? "outline outline-offset-2 outline-content"
-                  : "opacity-70 hover:opacity-100",
+                  ? "border-accent shadow-sm"
+                  : "border-line opacity-65 hover:border-line-strong hover:opacity-100",
               )}
             >
               <div className="aspect-3/4">
@@ -99,7 +106,10 @@ export function ProductGallery({
           leftover height as a cream block under the image. Backing the element the image
           actually occupies means there is no surface left to leak.
         */}
-        <div className="relative min-w-0 flex-1 overflow-hidden">
+        <div
+          {...swipeHandlers}
+          className="relative min-w-0 flex-1 touch-pan-y select-none overflow-hidden rounded-[1.5rem] border border-line bg-surface-sunken shadow-md"
+        >
           <div className="relative aspect-3/4 bg-surface-sunken">
             <ProductImage
               product={product}
@@ -164,7 +174,10 @@ export function ProductGallery({
         description={`${color.name} — ${VIEW_LABELS[index] ?? "view"}`}
         size="xl"
       >
-        <div className="relative mx-auto aspect-3/4 w-full max-w-xl bg-surface-sunken">
+        <div
+          {...swipeHandlers}
+          className="relative mx-auto aspect-3/4 w-full max-w-xl touch-pan-y select-none bg-surface-sunken"
+        >
           <ProductImage product={product} color={color} view={index} texture sizes="90vw" />
         </div>
 

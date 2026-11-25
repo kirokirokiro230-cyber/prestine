@@ -5,9 +5,12 @@ import { join } from "node:path";
  * Load environment files for the command-line tools.
  *
  * `next dev` and `next build` read `.env.local` and `.env` themselves. Nothing else does:
- * `drizzle-kit` looks only at `.env`, and a plain `tsx` script looks at neither. So the
- * migration and seed commands would read an empty `DIRECT_URL` while the app in the next
- * terminal window worked perfectly — which is a genuinely confusing half hour.
+ * a plain `tsx` script (like `scripts/toggle-maintenance.mjs` or the smoke test) looks at
+ * neither, so it would read an empty `SUPABASE_SERVICE_ROLE_KEY` while the app in the next
+ * terminal window worked perfectly — which is a genuinely confusing half hour. This file's
+ * job is specifically the scripts under `scripts/`, not the Next CLI and not the `supabase`
+ * CLI (check that CLI's own docs for its env-loading behaviour if running migrations
+ * depends on a value from here).
  *
  * Precedence matches Next's, and is a consequence of the order rather than of any special
  * handling: `process.loadEnvFile` does not overwrite a variable that is already set, so the

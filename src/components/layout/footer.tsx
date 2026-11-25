@@ -1,9 +1,9 @@
 import Link from "next/link";
 import {
   ArrowsCounterClockwise,
+  CreditCard,
   InstagramLogo,
   PinterestLogo,
-  Recycle,
   Truck,
   YoutubeLogo,
 } from "@phosphor-icons/react/dist/ssr";
@@ -34,7 +34,7 @@ export function Footer({
    * invites a shipping van next to a returns promise. A fourth promise cycles back to
    * the first icon rather than crashing on an undefined component.
    */
-  const ICONS = [Truck, ArrowsCounterClockwise, Recycle];
+  const ICONS = [Truck, ArrowsCounterClockwise, CreditCard];
 
   const servicePoints = settings.servicePromises.map((promise, index) => ({
     icon: ICONS[index % ICONS.length],
@@ -49,18 +49,19 @@ export function Footer({
   ].filter((social) => Boolean(social.href));
 
   return (
-    <footer className="mt-24 border-t border-line bg-surface">
+    <footer className="relative mt-28 overflow-hidden bg-inverse text-on-inverse">
+      <div aria-hidden className="absolute -right-40 top-32 size-[32rem] rounded-full bg-clay-600/20 blur-3xl" />
       {/* Service promises */}
-      <div className="border-b border-line">
-        <div className="page-gutter mx-auto grid max-w-page gap-8 py-12 sm:grid-cols-3">
+      <div className="border-b border-on-inverse/15">
+        <div className="page-gutter relative mx-auto grid max-w-page gap-4 py-12 sm:grid-cols-3">
           {servicePoints.map(({ icon: Icon, title, body }) => (
-            <div key={title} className="flex gap-4">
-              <Icon size={22} aria-hidden className="mt-0.5 shrink-0 text-content-muted" />
+            <div key={title} className="flex gap-4 rounded-2xl border border-on-inverse/10 bg-on-inverse/[0.045] p-5 backdrop-blur-sm sm:p-6">
+              <Icon size={22} aria-hidden className="mt-0.5 shrink-0 text-on-inverse/70" />
               <div>
-                <h3 className="font-sans text-2xs font-medium uppercase tracking-[0.14em] text-content">
+                <h3 className="font-sans text-2xs font-medium uppercase tracking-[0.14em] text-on-inverse">
                   {title}
                 </h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-content-muted">{body}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-on-inverse/75">{body}</p>
               </div>
             </div>
           ))}
@@ -71,8 +72,8 @@ export function Footer({
       <div className="page-gutter mx-auto max-w-page py-14">
         <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(4,1fr)] lg:gap-12">
           <div>
-            <Logo name={settings.name} size="sm" />
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-content-muted">
+            <Logo name={settings.name} size="sm" className="text-on-inverse" />
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-on-inverse/75">
               {settings.description}
             </p>
 
@@ -85,7 +86,7 @@ export function Footer({
                       target="_blank"
                       rel="noreferrer noopener"
                       aria-label={`${settings.name} on ${label} (opens in a new tab)`}
-                      className="grid size-11 place-items-center rounded-full text-content-muted transition-colors hover:bg-surface-sunken hover:text-content"
+                      className="grid size-11 place-items-center rounded-full text-on-inverse/75 transition-colors hover:bg-on-inverse/10 hover:text-on-inverse"
                     >
                       <Icon size={18} aria-hidden />
                     </a>
@@ -97,13 +98,15 @@ export function Footer({
 
           {columns.map((column) => (
             <nav key={column.heading} aria-label={column.heading}>
-              <h3 className="eyebrow mb-4">{column.heading}</h3>
+              <h3 className="text-2xs font-medium uppercase tracking-[0.12em] text-on-inverse/60 mb-4">
+                {column.heading}
+              </h3>
               <ul className="flex flex-col gap-2.5">
                 {column.links.map((link) => (
                   <li key={link.href + link.label}>
                     <Link
                       href={link.href}
-                      className="link-underline text-sm text-content-muted transition-colors hover:text-content"
+                      className="link-underline text-sm text-on-inverse/80 transition-colors hover:text-on-inverse"
                     >
                       {link.label}
                     </Link>
@@ -116,8 +119,8 @@ export function Footer({
       </div>
 
       {/* Legal strip */}
-      <div className="border-t border-line">
-        <div className="page-gutter mx-auto flex max-w-page flex-col gap-4 py-6 text-xs text-content-subtle sm:flex-row sm:items-center sm:justify-between">
+      <div className="border-t border-on-inverse/15">
+        <div className="page-gutter mx-auto flex max-w-page flex-col gap-4 py-6 text-xs text-on-inverse/65 sm:flex-row sm:items-center sm:justify-between">
           <p>
             © {year} {settings.legalName}. All rights reserved.
           </p>

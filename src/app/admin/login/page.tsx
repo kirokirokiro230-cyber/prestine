@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/admin/login-form";
+import { safeInternalPath } from "@/lib/safe-redirect";
 import { needsFirstAdmin } from "@/server/auth";
 import { currentAdmin } from "@/server/session";
 
@@ -22,5 +23,7 @@ export default async function LoginPage({
 
   const { next } = await searchParams;
 
-  return <LoginForm next={next && next.startsWith("/admin") ? next : "/admin"} />;
+  // Re-validated by the sign-in action too; this only keeps the hidden field honest.
+  const target = safeInternalPath(next, "/admin");
+  return <LoginForm next={target.startsWith("/admin") ? target : "/admin"} />;
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AdminPageHeader } from "@/components/admin/page-header";
 import { Panel, StatCard } from "@/components/admin/primitives";
 import { BarList, RevenueChart } from "@/components/admin/revenue-chart";
 import { createMoneyFormatter } from "@/lib/format";
@@ -83,31 +84,32 @@ export default async function ReportsPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl leading-tight">Reports</h1>
-          <p className="mt-1.5 text-sm text-content-muted">
-            Cancelled orders are excluded from every revenue figure.
-          </p>
-        </div>
-
-        <nav aria-label="Reporting period" className="flex items-center gap-1">
-          {WINDOWS.map((window) => (
-            <Link
-              key={window}
-              href={`/admin/reports?days=${window}`}
-              aria-current={window === days ? "page" : undefined}
-              className={
-                window === days
-                  ? "border border-line-strong bg-inverse px-3 py-2 text-2xs uppercase tracking-[0.1em] text-on-inverse"
-                  : "border border-line px-3 py-2 text-2xs uppercase tracking-[0.1em] text-content-muted transition-colors hover:border-line-strong hover:text-content"
-              }
-            >
-              {window === 365 ? "12 months" : `${window} days`}
-            </Link>
-          ))}
-        </nav>
-      </header>
+      <AdminPageHeader
+        eyebrow="Analytics"
+        title="Reports"
+        description="Revenue, merchandise performance, margins and customer health. Cancelled orders are excluded."
+        actions={
+          <nav
+            aria-label="Reporting period"
+            className="flex items-center gap-1 rounded-xl border border-line bg-surface p-1 shadow-xs"
+          >
+            {WINDOWS.map((window) => (
+              <Link
+                key={window}
+                href={`/admin/reports?days=${window}`}
+                aria-current={window === days ? "page" : undefined}
+                className={
+                  window === days
+                    ? "rounded-lg bg-accent px-3 py-2 text-2xs font-bold uppercase tracking-[0.1em] text-on-accent shadow-sm"
+                    : "rounded-lg px-3 py-2 text-2xs font-semibold uppercase tracking-[0.1em] text-content-muted transition-colors hover:bg-surface-sunken hover:text-content"
+                }
+              >
+                {window === 365 ? "12 months" : `${window} days`}
+              </Link>
+            ))}
+          </nav>
+        }
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

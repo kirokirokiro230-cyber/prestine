@@ -6,14 +6,21 @@ import { lookupOrders } from "@/app/actions/orders";
 import { pendingReviews } from "@/app/actions/reviews";
 import { CancelOrder } from "@/components/account/cancel-order";
 import { OrderLines } from "@/components/account/order-lines";
+import { OrderProgress } from "@/components/account/order-progress";
+import { OrderThumbnails } from "@/components/account/order-thumbnails";
+import { ReturnSection } from "@/components/account/return-section";
 import { ReviewForm } from "@/components/product/review-form";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Modal } from "@/components/ui/modal";
+import { BlockListSkeleton } from "@/components/ui/skeleton";
 import { useIsHydrated } from "@/hooks/use-store";
 import { addressName, createMoneyFormatter, formatDate, pluralise } from "@/lib/format";
+import { cancelEligibility } from "@/lib/order-cancellation";
 import { listOrderRefs } from "@/lib/orders";
+import { carrierLabel, trackingUrl } from "@/lib/tracking-url";
+import { cn } from "@/lib/utils";
 import type { Order } from "@/lib/types";
 import type { PendingReviewItem } from "@/server/repositories/reviews";
 
@@ -46,7 +53,7 @@ const STATUS_LABEL = {
 export function OrderHistory({
   settings,
 }: {
-  settings: { currency: string; locale: string };
+  settings: { currency: string; locale: string; returnWindowHours: number };
 }) {
   const hydrated = useIsHydrated();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -101,16 +108,39 @@ export function OrderHistory({
    * An empty string means the shopper explicitly closed everything.
    */
   const [override, setOverride] = useState<string | null>(null);
-  const expanded = override === null ? (orders[0]?.id ?? null) : override || null;
+
+  /**
+   * Which statuses to show. `"open"` is the useful default view once a history
+   * gets long — a shopper coming here almost always wants the parcel that has
+   * not arrived yet, not the one from last spring.
+   *
+   * Derived into the list below rather than refetching: `lookupOrders` already
+   * returned everything the claim tickets can reach, so filtering is free and
+   * instant.
+   */
+  const [filter, setFilter] = useState<"all" | "open" | "delivered">("all");
+
+  const visible =
+    filter === "all"
+      ? orders
+      : filter === "open"
+        ? orders.filter(
+            (order) => order.status === "processing" || order.status === "shipped",
+          )
+        : orders.filter((order) => order.status === "delivered");
+
+  const openCount = orders.filter(
+    (order) => order.status === "processing" || order.status === "shipped",
+  ).length;
+
+  const expanded = override === null ? (visible[0]?.id ?? null) : override || null;
 
   const toggle = (id: string) => setOverride(expanded === id ? "" : id);
 
   if (!hydrated || state === "loading") {
     return (
-      <div className="flex flex-col gap-4">
-        {Array.from({ length: 2 }, (_, i) => (
-          <div key={i} className="h-32 animate-shimmer bg-surface-sunken" />
-        ))}
+      <div role="status" aria-label="Loading your orders">
+        <BlockListSkeleton count={2} blockClassName="h-32" />
       </div>
     );
   }
@@ -145,8 +175,60 @@ export function OrderHistory({
 
   return (
     <>
+      {/*
+        Only worth showing once there is enough history for it to do anything.
+        Three filter chips above two orders is furniture.
+      */}
+      {orders.length > 2 ? (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+          <div role="group" aria-label="Filter orders" className="flex flex-wrap gap-1">
+            {(
+              [
+                ["all", `All (${orders.length})`],
+                ["open", `In progress${openCount > 0 ? ` (${openCount})` : ""}`],
+                ["delivered", "Delivered"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={filter === value}
+                onClick={() => {
+                  setFilter(value);
+                  // Let the filtered list pick its own first order to expand
+                  // rather than keeping a card open that is no longer shown.
+                  setOverride(null);
+                }}
+                className={cn(
+                  "min-h-9 px-3 text-2xs uppercase tracking-[0.1em] transition-colors",
+                  filter === value
+                    ? "bg-inverse text-on-inverse"
+                    : "text-content-muted hover:text-content",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {visible.length === 0 ? (
+        <p className="border border-line bg-surface p-6 text-sm text-content-muted">
+          Nothing here under that filter.{" "}
+          <button
+            type="button"
+            onClick={() => setFilter("all")}
+            className="link-underline text-content"
+          >
+            Show all orders
+          </button>
+          .
+        </p>
+      ) : null}
+
       <ul className="flex flex-col gap-4">
-        {orders.map((order) => {
+        {visible.map((order) => {
           const open = expanded === order.id;
           const itemCount = order.lines.reduce((sum, line) => sum + line.quantity, 0);
 
@@ -163,41 +245,64 @@ export function OrderHistory({
 
           return (
             <li key={order.id} className="border border-line bg-surface">
-              <div className="flex flex-wrap items-start justify-between gap-4 p-5">
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h2 data-numeric className="font-sans text-sm font-medium">
-                      {order.id}
-                    </h2>
-                    <Badge tone={STATUS_TONE[order.status]}>
-                      {STATUS_LABEL[order.status]}
-                    </Badge>
+              {/*
+                Identity and money on one line, the parcel's progress below it,
+                then actions in their own divided row. Previously all three
+                competed for the same flex row and wrapped into a pile on
+                anything narrower than a laptop.
+              */}
+              <div className="flex items-start gap-4 p-5 sm:gap-5">
+                <OrderThumbnails lines={order.lines} />
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <h2 data-numeric className="font-sans text-sm font-medium">
+                          {order.id}
+                        </h2>
+                        <Badge tone={STATUS_TONE[order.status]}>
+                          {STATUS_LABEL[order.status]}
+                        </Badge>
+                      </div>
+
+                      <p className="mt-1.5 text-xs text-content-muted">
+                        {formatDate(order.placedAt, "short")}
+                        <span aria-hidden className="mx-1.5 text-content-subtle">
+                          ·
+                        </span>
+                        <span data-numeric>{pluralise(itemCount, "piece")}</span>
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p data-numeric className="text-sm text-content">
+                        {money(order.totals.total)}
+                      </p>
+                      {/*
+                        COD is worth naming here. An unpaid order in a history
+                        list otherwise looks like something went wrong, when in
+                        fact the shopper simply has not been asked for the money
+                        yet.
+                      */}
+                      {order.paymentMethod === "cod" ? (
+                        <p className="mt-0.5 text-2xs uppercase tracking-[0.1em] text-content-subtle">
+                          {order.paymentStatus === "paid" ? "Paid on delivery" : "Pay on delivery"}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
-                  <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-content-muted">
-                    <div className="flex gap-1.5">
-                      <dt>Placed</dt>
-                      <dd className="text-content">{formatDate(order.placedAt, "short")}</dd>
-                    </div>
-                    <div className="flex gap-1.5">
-                      <dt>Items</dt>
-                      <dd data-numeric className="text-content">
-                        {pluralise(itemCount, "piece")}
-                      </dd>
-                    </div>
-                    <div className="flex gap-1.5">
-                      <dt>Total</dt>
-                      <dd data-numeric className="text-content">
-                        {money(order.totals.total)}
-                      </dd>
-                    </div>
-                  </dl>
+                  <div className="mt-5">
+                    <OrderProgress order={order} />
+                  </div>
                 </div>
+              </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  {order.trackingNumber ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-line px-5 py-3.5">
+                  {trackingUrl(order.carrier, order.trackingNumber) ? (
                     <a
-                      href={`https://track.dpd.co.uk/search?reference=${order.trackingNumber}`}
+                      href={trackingUrl(order.carrier, order.trackingNumber)!}
                       target="_blank"
                       rel="noreferrer noopener"
                       className="inline-flex items-center gap-1.5 text-2xs uppercase tracking-[0.1em] text-content-muted transition-colors hover:text-content"
@@ -209,15 +314,44 @@ export function OrderHistory({
                   ) : null}
 
                   {/*
-                    Only while processing. The server refuses a later cancellation
-                    independently, but offering the button and then rejecting it
-                    would be a worse experience than not offering it.
+                    Only while the courier has not collected the parcel. The same rule
+                    the server applies (`cancelEligibility`), so the page never offers
+                    something the server then refuses. The server also asks the courier
+                    live, because this stored state can trail a pickup by one tracking
+                    sweep — if it does, the customer is told why rather than cancelled.
                   */}
-                  {order.status === "processing" && order.email ? (
+                  {order.email && cancelEligibility(order).allowed ? (
                     <CancelOrder
                       order={order}
                       email={order.email}
                       onCancelled={() => setReloadKey((key) => key + 1)}
+                    />
+                  ) : null}
+
+                  {/*
+                    Once it cannot be cancelled, say so instead of silently removing the
+                    button — a shopper who wonders where it went emails us. Only for an
+                    order that is actually on its way; a cancelled or delivered order
+                    needs no such explanation.
+                  */}
+                  {order.email && order.status !== "cancelled" && order.status !== "delivered" && !cancelEligibility(order).allowed ? (
+                    <span className="text-2xs text-content-subtle">
+                      Already with the courier, so it can no longer be cancelled.
+                    </span>
+                  ) : null}
+
+                  {/*
+                    Returns. A delivered order shows exactly one of: the status of the
+                    return already raised, the button (while the window is open), or a
+                    note that the window has closed. A cancelled return counts as none,
+                    so the customer can ask again.
+                  */}
+                  {order.status === "delivered" && order.email ? (
+                    <ReturnSection
+                      order={order}
+                      email={order.email}
+                      windowHours={settings.returnWindowHours}
+                      onRequested={() => setReloadKey((key) => key + 1)}
                     />
                   ) : null}
 
@@ -237,18 +371,22 @@ export function OrderHistory({
                     </button>
                   ) : null}
 
+                  {/*
+                    Pushed to the far end of the row, so the destructive and
+                    one-off actions group together on the left and the harmless
+                    expand toggle always sits in the same place.
+                  */}
                   <button
                     type="button"
                     onClick={() => toggle(order.id)}
                     aria-expanded={open}
                     aria-controls={`order-${order.id}`}
-                    className="text-2xs uppercase tracking-[0.1em] text-content transition-colors hover:text-accent"
+                    className="ml-auto text-2xs uppercase tracking-[0.1em] text-content transition-colors hover:text-accent"
                   >
                     <span className="link-underline">
                       {open ? "Hide detail" : "View detail"}
                     </span>
                   </button>
-                </div>
               </div>
 
               {/*
@@ -287,12 +425,31 @@ export function OrderHistory({
                     </address>
                   </div>
 
-                  {order.carrier && order.trackingNumber ? (
+                  {order.trackingNumber ? (
                     <div>
                       <h3 className="eyebrow mb-2">Carrier</h3>
                       <p data-numeric className="text-xs text-content-muted">
-                        {order.carrier} — {order.trackingNumber}
+                        {carrierLabel(order.carrier)} — {order.trackingNumber}
                       </p>
+                      {/*
+                        The courier's own wording, shown verbatim. It is more
+                        current than our fulfilment status, which only moves when
+                        the tracking sweep runs.
+                      */}
+                      {order.shippingStatus ? (
+                        <p className="mt-1 text-xs text-content-muted">
+                          {order.shippingStatus}
+                        </p>
+                      ) : null}
+                      {order.expectedDeliveryDate ? (
+                        <p className="mt-1 text-xs text-content-muted">
+                          Expected{" "}
+                          {new Date(order.expectedDeliveryDate).toLocaleDateString(
+                            settings.locale,
+                            { day: "numeric", month: "long" },
+                          )}
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

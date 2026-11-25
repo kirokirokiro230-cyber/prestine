@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   applyPromo,
+  defaultPricingRules,
   cartLineId,
   freeShippingShortfall,
   itemCount,
@@ -153,5 +154,84 @@ describe("order summary", () => {
     for (const value of Object.values(summary)) {
       if (typeof value === "number") assert.ok(Number.isInteger(value), `${value} is not an integer`);
     }
+  });
+});
+
+describe("the first-order discount", () => {
+  const rules = { ...defaultPricingRules, firstOrderPercent: 10, taxRate: 0, freeShippingThreshold: 0 };
+  const basket = [line({ unitPrice: 100_000, quantity: 1 })];
+
+  it("takes the percentage off when the customer is eligible", () => {
+    const summary = orderSummary({ lines: basket, rules, firstOrder: true });
+
+    assert.equal(summary.discount, 10_000);
+    assert.equal(summary.total, 90_000);
+    assert.deepEqual(summary.firstOrder, { percent: 10 });
+    assert.equal(summary.promo, undefined);
+  });
+
+  it("does nothing unless the server says the customer is eligible", () => {
+    const summary = orderSummary({ lines: basket, rules });
+
+    assert.equal(summary.discount, 0);
+    assert.equal(summary.firstOrder, undefined);
+  });
+
+  it("does nothing when the offer is switched off, even for an eligible customer", () => {
+    const summary = orderSummary({
+      lines: basket,
+      rules: { ...rules, firstOrderPercent: 0 },
+      firstOrder: true,
+    });
+
+    assert.equal(summary.discount, 0);
+    assert.equal(summary.firstOrder, undefined);
+  });
+
+  it("does not stack with a code: the larger applies", () => {
+    const bigger = orderSummary({
+      lines: basket,
+      rules: { ...rules, promoCodes: [{ code: "BIG", percentOff: 25, description: "" }] },
+      promoCode: "BIG",
+      firstOrder: true,
+    });
+    assert.equal(bigger.discount, 25_000);
+    assert.equal(bigger.promo?.code, "BIG");
+    assert.equal(bigger.firstOrder, undefined);
+
+    const smaller = orderSummary({
+      lines: basket,
+      rules: { ...rules, promoCodes: [{ code: "SMALL", percentOff: 5, description: "" }] },
+      promoCode: "SMALL",
+      firstOrder: true,
+    });
+    assert.equal(smaller.discount, 10_000);
+    assert.equal(smaller.promo, undefined);
+    assert.deepEqual(smaller.firstOrder, { percent: 10 });
+  });
+
+  it("leaves the single-use discount unspent on a tie, so the code is used first", () => {
+    const tie = orderSummary({
+      lines: basket,
+      rules: { ...rules, promoCodes: [{ code: "TEN", percentOff: 10, description: "" }] },
+      promoCode: "TEN",
+      firstOrder: true,
+    });
+
+    assert.equal(tie.promo?.code, "TEN");
+    assert.equal(tie.firstOrder, undefined);
+  });
+
+  it("is worked out before tax and shipping, so the total adds up", () => {
+    const summary = orderSummary({
+      lines: basket,
+      rules: { ...rules, taxRate: 0.18, freeShippingThreshold: 1_000_000, standardShippingRate: 9_900 },
+      firstOrder: true,
+    });
+
+    assert.equal(summary.discount, 10_000);
+    assert.equal(summary.tax, 16_200);
+    assert.equal(summary.shipping, 9_900);
+    assert.equal(summary.total, 90_000 + 16_200 + 9_900);
   });
 });

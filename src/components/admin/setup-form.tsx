@@ -16,8 +16,10 @@ export function SetupForm() {
   const [state, action] = useActionState<AuthFormState, FormData>(createFirstAdmin, {});
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-canvas px-5 py-12">
-      <div className="w-full max-w-md">
+    <div className="admin-theme relative flex min-h-dvh items-center justify-center overflow-hidden bg-canvas px-5 py-12">
+      <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-accent" />
+      <div aria-hidden className="absolute -left-32 -top-32 size-96 rounded-full bg-accent-soft blur-3xl" />
+      <div className="relative w-full max-w-md">
         <div className="mb-8 text-center">
           <span className="font-display text-2xl tracking-[0.3em] text-content">
             <span className="-mr-[0.3em] pr-[0.3em]">PRESTINE</span>
@@ -27,7 +29,7 @@ export function SetupForm() {
           </p>
         </div>
 
-        <form action={action} className="flex flex-col gap-4 border border-line bg-surface p-6">
+        <form action={action} className="flex flex-col gap-5 rounded-2xl border border-line bg-surface p-6 shadow-xl sm:p-8">
           <div>
             <h1 className="font-display text-2xl leading-tight">Create the owner account</h1>
             <p className="mt-1.5 text-xs leading-relaxed text-content-muted">

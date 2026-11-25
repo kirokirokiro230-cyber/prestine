@@ -8,16 +8,21 @@ import {
 } from "../login-attempts";
 
 /**
- * Exercises the in-memory backend, which is what runs without `DATABASE_URL` — local
- * development and this suite. The table-backed path shares its policy through
+ * Exercises the in-memory backend, which is what runs when Supabase is not configured —
+ * local development and this suite. The table-backed path (`rate_limit_hits`, added in
+ * `supabase/migrations/00000000000010_rate_limits.sql`) shares its policy through
  * `lockoutFrom`, tested exhaustively in `src/lib/__tests__/login-throttle.test.ts`, so
  * what is verified here is the wiring: that attempts accumulate against the right key,
  * that a success clears them, and that keys do not leak into each other.
+ *
+ * The environment variables are cleared rather than merely assumed absent, so the suite
+ * keeps testing the in-memory path even on a machine with real credentials exported.
  */
 describe("login attempt tracking", () => {
   beforeEach(() => {
     resetLoginAttempts();
-    delete process.env.DATABASE_URL;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   it("starts unlocked", async () => {

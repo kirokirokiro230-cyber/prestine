@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { normalisePhone } from "@/lib/phone";
 import type { CustomerAccount } from "@/lib/types";
 import { hashPassword, validatePasswordStrength } from "./auth";
-import { getDb, isDatabaseConfigured } from "./db/client";
-import { fromCustomer, toCustomer } from "./db/mappers";
-import { customers as customersTable } from "./db/schema";
-import { mutateStore, readStore } from "./store";
+import { db, insertInto, unwrap, updateTable } from "./supabase";
+import type { CustomerRow } from "./database.types";
 
 /**
  * Shopper accounts.
@@ -19,10 +16,22 @@ import { mutateStore, readStore } from "./store";
  * What differs is the identifier. `admins` look each other up by email; a shopper is
  * looked up by phone, normalised to E.164 on every read and write so `+91 98765 43210`
  * and `9876543210` resolve to the same row.
- *
- * Two backends, chosen by whether a database is configured — see `login-attempts.ts`
- * for the precedent.
  */
+
+function fromRow(row: CustomerRow): CustomerAccount {
+  return {
+    id: row.id,
+    phone: row.phone,
+    name: row.name,
+    email: row.email ?? undefined,
+    passwordHash: row.password_hash,
+    passwordSalt: row.password_salt,
+    phoneVerifiedAt: row.phone_verified_at,
+    createdAt: row.created_at,
+    lastLoginAt: row.last_login_at ?? undefined,
+    disabled: row.disabled,
+  };
+}
 
 export async function findCustomerByPhone(
   phone: string,
@@ -30,26 +39,29 @@ export async function findCustomerByPhone(
   const normalised = normalisePhone(phone);
   if (!normalised) return undefined;
 
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).customers.find((customer) => customer.phone === normalised);
-  }
-
-  const [row] = await getDb()
-    .select()
-    .from(customersTable)
-    .where(eq(customersTable.phone, normalised));
-  return row ? toCustomer(row) : undefined;
+  const row = unwrap(
+    await db()
+      .from("customers")
+      .select("*")
+      .eq("phone", normalised)
+      .maybeSingle()
+      .overrideTypes<CustomerRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 export async function findCustomerById(
   id: string,
 ): Promise<CustomerAccount | undefined> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).customers.find((customer) => customer.id === id);
-  }
-
-  const [row] = await getDb().select().from(customersTable).where(eq(customersTable.id, id));
-  return row ? toCustomer(row) : undefined;
+  const row = unwrap(
+    await db()
+      .from("customers")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle()
+      .overrideTypes<CustomerRow, { merge: false }>(),
+  );
+  return row ? fromRow(row) : undefined;
 }
 
 export interface CreateCustomerInput {
@@ -78,49 +90,25 @@ export async function createCustomer(
   const phone = normalisePhone(input.phone);
   if (!phone) throw new Error("Enter a valid mobile number.");
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      if (store.customers.some((customer) => customer.phone === phone)) {
-        throw new Error("An account with that number already exists.");
-      }
+  const existing = await findCustomerByPhone(phone);
+  if (existing) throw new Error("An account with that number already exists.");
 
-      const customer: CustomerAccount = {
-        id: `cus_${randomUUID().slice(0, 8)}`,
-        phone,
-        name: input.name.trim(),
-        email: input.email?.trim().toLowerCase() || undefined,
-        passwordHash: input.passwordHash,
-        passwordSalt: input.passwordSalt,
-        phoneVerifiedAt: input.phoneVerifiedAt,
-        createdAt: new Date().toISOString(),
-      };
-
-      store.customers.push(customer);
-      return customer;
-    });
-  }
-
-  return getDb().transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: customersTable.id })
-      .from(customersTable)
-      .where(eq(customersTable.phone, phone));
-    if (existing) throw new Error("An account with that number already exists.");
-
-    const customer: CustomerAccount = {
+  const row = unwrap(
+    await insertInto(db(), "customers", {
       id: `cus_${randomUUID().slice(0, 8)}`,
       phone,
       name: input.name.trim(),
-      email: input.email?.trim().toLowerCase() || undefined,
-      passwordHash: input.passwordHash,
-      passwordSalt: input.passwordSalt,
-      phoneVerifiedAt: input.phoneVerifiedAt,
-      createdAt: new Date().toISOString(),
-    };
+      email: input.email?.trim().toLowerCase() || null,
+      password_hash: input.passwordHash,
+      password_salt: input.passwordSalt,
+      phone_verified_at: input.phoneVerifiedAt,
+    })
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as CustomerRow;
 
-    await tx.insert(customersTable).values(fromCustomer(customer));
-    return customer;
-  });
+  return fromRow(row);
 }
 
 /**
@@ -139,70 +127,20 @@ export async function setCustomerPassword(
 
   const { hash, salt } = await hashPassword(password);
 
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      const customer = store.customers.find((entry) => entry.id === id);
-      if (!customer) throw new Error("Account not found.");
+  const { data, error } = await updateTable(db(), "customers", {
+    password_hash: hash,
+    password_salt: salt,
+  })
+    .eq("id", id)
+    .select("id");
 
-      customer.passwordHash = hash;
-      customer.passwordSalt = salt;
-    });
-    return;
-  }
-
-  const result = await getDb()
-    .update(customersTable)
-    .set({ passwordHash: hash, passwordSalt: salt })
-    .where(eq(customersTable.id, id))
-    .returning({ id: customersTable.id });
-  if (result.length === 0) throw new Error("Account not found.");
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) throw new Error("Account not found.");
 }
 
 export async function recordCustomerLogin(id: string): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      const customer = store.customers.find((entry) => entry.id === id);
-      if (customer) customer.lastLoginAt = new Date().toISOString();
-    });
-    return;
-  }
-
-  await getDb()
-    .update(customersTable)
-    .set({ lastLoginAt: new Date() })
-    .where(eq(customersTable.id, id));
-}
-
-/**
- * Link a customer to its Supabase Auth identity.
- *
- * Called by the OTP flow after a successful verification, once `ensureAuthUser` has
- * returned the matching `auth.users` id. Idempotent in effect — the value written is the
- * same on every sign-in for a given number — so calling it again on a returning customer
- * simply rewrites the same id. Kept a single-field updater alongside `setCustomerPassword`
- * and `recordCustomerLogin` rather than folded into `createCustomer`, because a returning
- * customer needs it set without a row being created, and an account that predates the
- * bridge gets it backfilled on its next verification.
- *
- * Not allowed to be the thing that fails a sign-in: the caller treats a thrown error as
- * "link it next time" and proceeds. The unique index on `auth_user_id` still holds, so a
- * genuine conflict (the same identity already on another row) surfaces rather than being
- * silently swallowed here.
- */
-export async function setCustomerAuthUserId(
-  id: string,
-  authUserId: string,
-): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      const customer = store.customers.find((entry) => entry.id === id);
-      if (customer) customer.authUserId = authUserId;
-    });
-    return;
-  }
-
-  await getDb()
-    .update(customersTable)
-    .set({ authUserId })
-    .where(eq(customersTable.id, id));
+  const { error } = await updateTable(db(), "customers", {
+    last_login_at: new Date().toISOString(),
+  }).eq("id", id);
+  if (error) throw new Error(error.message);
 }

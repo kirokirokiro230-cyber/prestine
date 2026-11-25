@@ -77,20 +77,20 @@ export async function ProductListing({
     `${basePath}${buildQueryString(currentParams, { page: target })}`;
 
   return (
-    <div className="page-gutter mx-auto max-w-page py-8 lg:py-12">
-      {breadcrumbs ? <Breadcrumbs items={breadcrumbs} className="mb-6" /> : null}
+    <div className="page-gutter mx-auto max-w-page py-10 lg:py-16">
+      {breadcrumbs ? <Breadcrumbs items={breadcrumbs} className="mb-8" /> : null}
 
-      <header className="max-w-2xl">
-        {eyebrow ? <p className="eyebrow mb-3">{eyebrow}</p> : null}
-        <h1 className="text-4xl leading-[1.05] sm:text-5xl">{title}</h1>
+      <header className="relative max-w-3xl border-l-2 border-accent pl-5 sm:pl-7">
+        {eyebrow ? <p className="eyebrow mb-4">{eyebrow}</p> : null}
+        <h1 className="text-5xl leading-[0.98] sm:text-6xl lg:text-7xl">{title}</h1>
         {description ? (
-          <p className="mt-4 text-sm leading-relaxed text-content-muted sm:text-base">
+          <p className="mt-5 max-w-2xl text-sm leading-7 text-content-muted sm:text-base">
             {description}
           </p>
         ) : null}
       </header>
 
-      <div className="mt-10 grid gap-10 lg:grid-cols-[16rem_1fr] lg:gap-12">
+      <div className="mt-14 grid gap-10 lg:grid-cols-[16rem_1fr] lg:gap-14">
         {/* Desktop filter rail */}
         <aside className="hidden lg:block">
           <div className="sticky top-28">
@@ -107,7 +107,7 @@ export async function ProductListing({
 
         <div className="min-w-0">
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface/75 px-4 py-3 shadow-xs backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <MobileFilters
                 facets={facets}

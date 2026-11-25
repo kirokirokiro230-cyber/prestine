@@ -1,14 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { CaretLeft } from "@phosphor-icons/react/dist/ssr";
 import { OrderFulfilment } from "@/components/admin/order-fulfilment";
+import { OrderRefunds, type RefundView } from "@/components/admin/order-refunds";
+import { OrderReturns } from "@/components/admin/order-returns";
+import { OrderShipment } from "@/components/admin/order-shipment";
 import { Panel, StatusPill } from "@/components/admin/primitives";
 import { GarmentArt } from "@/components/product/garment-art";
 import { createMoneyFormatter, formatDate } from "@/lib/format";
+import { refundableRemaining } from "@/lib/refund";
 import { auditFor } from "@/server/audit";
+import { orderUsedFirstOrderDiscount } from "@/server/first-order";
 import { emailLogForOrder } from "@/server/repositories/email";
 import { getOrder, queryOrders } from "@/server/repositories/orders";
+import { listOrderRefunds } from "@/server/repositories/refunds";
+import { getOrderReturns, getOrderShipments, getShipmentScans } from "@/server/repositories/shipping";
 import { getSettings } from "@/server/repositories/settings";
 import { can, requireAdmin } from "@/server/session";
 
@@ -32,7 +40,7 @@ export default async function OrderDetailPage({
   const order = await getOrder(id);
   if (!order) notFound();
 
-  const [settings, history, emails, customerOrders] = await Promise.all([
+  const [settings, history, emails, customerOrders, shipments, returns, refundLedger, usedFirstOrder] = await Promise.all([
     getSettings(),
     auditFor("order", id),
     emailLogForOrder(id),
@@ -46,9 +54,54 @@ export default async function OrderDetailPage({
         order.shippingAddress.postalCode,
       perPage: 6,
     }),
+    getOrderShipments(id),
+    // Never let a returns problem take the whole order page down.
+    getOrderReturns(id).catch(() => []),
+    // Same: a refund ledger problem must not stop staff opening the order.
+    listOrderRefunds(id).catch((error) => {
+      console.error("[refund] could not load refunds:", (error as Error).message);
+      return { refunds: [], available: false };
+    }),
+    // Only a label. Never throws.
+    orderUsedFirstOrderDiscount(id),
   ]);
 
+  const { refunds, available: refundsAvailable } = refundLedger;
+
+  /*
+   * The outbound parcel. A return creates a second, reverse shipment against the
+   * same order, and that one does not belong in the fulfilment panel.
+   */
+  const forwardShipment =
+    shipments.find((entry) => entry.shipment_type === "forward") ?? null;
+
+  const scans = forwardShipment ? await getShipmentScans(forwardShipment.id) : [];
+
   const money = createMoneyFormatter(settings.currency, settings.locale);
+  const currencySymbol =
+    new Intl.NumberFormat(settings.locale, { style: "currency", currency: settings.currency })
+      .formatToParts(0)
+      .find((part) => part.type === "currency")?.value ?? settings.currency;
+  /*
+   * Refunds go back through Cashfree, so only a prepaid order that was actually paid has
+   * anything to send. A COD order's refund is a manual UPI transfer, handled in the Return
+   * panel.
+   */
+  const canRefundOnline = order.paymentMethod !== "cod" && order.paymentStatus === "paid";
+  const refundable = refundableRemaining(order.totals.total, refunds);
+
+  // Only what the browser needs. The ledger row also carries Cashfree's ids.
+  const refundViews: RefundView[] = refunds.map((entry) => ({
+    id: entry.id,
+    amount: entry.amount,
+    status: entry.status,
+    note: entry.note,
+    actorEmail: entry.actorEmail,
+    failureReason: entry.failureReason,
+    createdAt: entry.createdAt,
+    returnId: entry.returnId,
+  }));
+
   const units = order.lines.reduce((sum, line) => sum + line.quantity, 0);
   const repeatOrders = customerOrders.items.filter((entry) => entry.id !== order.id);
 
@@ -142,7 +195,12 @@ export default async function OrderDetailPage({
             <dl className="flex flex-col gap-2 border-t border-line px-5 py-4 text-sm">
               <Row term="Subtotal">{money(order.totals.subtotal)}</Row>
               {order.totals.discount > 0 ? (
-                <Row term={`Discount${order.promoCode ? ` (${order.promoCode})` : ""}`} positive>
+                <Row
+                  term={`Discount${
+                    order.promoCode ? ` (${order.promoCode})` : usedFirstOrder ? " (first order)" : ""
+                  }`}
+                  positive
+                >
                   −{money(order.totals.discount)}
                 </Row>
               ) : null}
@@ -150,14 +208,60 @@ export default async function OrderDetailPage({
                 {order.totals.shipping === 0 ? "Complimentary" : money(order.totals.shipping)}
               </Row>
               <Row term="Tax">{money(order.totals.tax)}</Row>
+              {order.totals.codFee > 0 ? (
+                <Row term="COD fee">{money(order.totals.codFee)}</Row>
+              ) : null}
               <div className="mt-1 flex items-baseline justify-between border-t border-line pt-3">
                 <dt className="font-medium">Total</dt>
                 <dd data-numeric className="text-base">
                   {money(order.totals.total)}
                 </dd>
               </div>
+              {/*
+                Spelled out for whoever is packing: a COD parcel has cash to
+                collect, and the amount is the order total including the fee.
+              */}
+              {order.paymentMethod === "cod" ? (
+                <p className="mt-2 border-t border-line pt-3 text-xs leading-relaxed text-content-muted">
+                  Cash on delivery —{" "}
+                  <span className="font-medium text-content">{money(order.totals.total)}</span>{" "}
+                  to collect at the door.
+                  {order.paymentStatus === "paid"
+                    ? " Collected."
+                    : " Not yet collected."}
+                </p>
+              ) : null}
             </dl>
           </Panel>
+
+          <OrderShipment
+            orderId={order.id}
+            shipment={forwardShipment}
+            scans={scans}
+            canWrite={can(admin, "orders:write")}
+          />
+
+          <OrderReturns
+            returns={returns}
+            orderTotal={order.totals.total}
+            currencySymbol={currencySymbol}
+            canWrite={can(admin, "orders:write")}
+            prepaid={order.paymentMethod !== "cod"}
+            refundable={refundable}
+            refundKey={randomUUID()}
+          />
+
+          <OrderRefunds
+            orderId={order.id}
+            orderTotal={order.totals.total}
+            currencySymbol={currencySymbol}
+            refunds={refundViews}
+            available={refundsAvailable}
+            canWrite={can(admin, "orders:write")}
+            canRefund={canRefundOnline}
+            cancelled={order.status === "cancelled"}
+            refundKey={randomUUID()}
+          />
 
           <OrderFulfilment order={order} canWrite={can(admin, "orders:write")} />
 
@@ -253,14 +357,45 @@ export default async function OrderDetailPage({
 
           <Panel title="Payment">
             <dl className="flex flex-col gap-2 text-sm">
+              <Row term="Status">
+                <span
+                  className={
+                    order.paymentStatus === "paid"
+                      ? "text-success-700 dark:text-success-500"
+                      : order.paymentStatus === "failed"
+                        ? "text-danger-500 dark:text-danger-100"
+                        : "text-content-muted"
+                  }
+                >
+                  {order.paymentStatus === "paid"
+                    ? "Paid"
+                    : order.paymentStatus === "failed"
+                      ? "Failed"
+                      : "Awaiting payment"}
+                </span>
+              </Row>
+              <Row term="Provider">{order.paymentProvider ?? "Not recorded"}</Row>
+              {order.cashfreeOrderId ? (
+                <Row term="Cashfree order">
+                  <span data-numeric>{order.cashfreeOrderId}</span>
+                </Row>
+              ) : null}
+              {order.cashfreePaymentId ? (
+                <Row term="Cashfree payment">
+                  <span data-numeric>{order.cashfreePaymentId}</span>
+                </Row>
+              ) : null}
+              {order.paidAt ? (
+                <Row term="Paid at">{formatDate(order.paidAt, "short")}</Row>
+              ) : null}
               <Row term="Method">
                 {order.cardLast4 ? `Card ending ${order.cardLast4}` : "Not recorded"}
               </Row>
-
             </dl>
             <p className="mt-4 text-xs leading-relaxed text-content-subtle">
-              This build does not process payments, so there is nothing to refund here.
-              Once a payment provider is connected, refunds belong on this panel.
+              Prepaid orders are refunded from the Refunds panel, back to what the customer
+              paid with. A cash-on-delivery return is paid to the customer’s UPI ID by hand;
+              see the Return panel. This panel reflects status only.
             </p>
           </Panel>
 

@@ -8,6 +8,7 @@
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
+
 /* ============================================================
    LAYER 1 — PRIMITIVE TOKENS
    Raw values with no meaning attached. These change rarely; the
@@ -24,58 +25,77 @@
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1.35;
 
-  /* Ink — warm near-blacks and greys, never pure grey */
-  --color-ink-100: #e8e6e1;
-  --color-ink-200: #cdc9c1;
-  --color-ink-300: #a9a49a;
-  --color-ink-400: #807b71;
-  --color-ink-500: #605c54;
-  --color-ink-600: #4a4741;
-  --color-ink-700: #383530;
-  --color-ink-800: #24221e;
-  --color-ink-900: #171512;
-  --color-ink-950: #0d0c0a;
+  /* Ink — neutral near-blacks and greys, no warm cast */
+  --color-ink-100: #e7e7e7;
+  --color-ink-200: #cccccc;
+  --color-ink-300: #a3a3a3;
+  --color-ink-400: #7a7a7a;
+  --color-ink-500: #595959;
+  --color-ink-600: #454545;
+  --color-ink-700: #333333;
+  --color-ink-800: #212121;
+  --color-ink-900: #141414;
+  --color-ink-950: #0a0a0a;
 
-  /* Bone — the off-whites the shop is built on */
-  --color-bone-50: #fdfcfa;
-  --color-bone-100: #fbf9f6;
-  --color-bone-200: #f5f1ea;
-  --color-bone-300: #ede7dd;
-  --color-bone-400: #e0d7c9;
+  /* Bone — the neutral off-whites the shop is built on */
+  --color-bone-50: #fcfcfc;
+  --color-bone-100: #f9f9f9;
+  --color-bone-200: #f0f0f0;
+  --color-bone-300: #e4e4e4;
+  --color-bone-400: #d4d4d4;
 
-  /* Clay — the accent */
-  --color-clay-50: #faf3ef;
-  --color-clay-100: #f2e2d8;
-  --color-clay-200: #e3c4b2;
-  --color-clay-300: #cfa189;
-  --color-clay-500: #a06a4c;
-  --color-clay-600: #85543c;
-  --color-clay-700: #6a4331;
-  --color-clay-900: #38251d;
+  /* Clay — retained as a legacy token name, now a monochrome warm-stone scale. */
+  --color-clay-50: #f5f2eb;
+  --color-clay-100: #e9e4da;
+  --color-clay-200: #d3cbc0;
+  --color-clay-300: #aaa39a;
+  --color-clay-500: #625e58;
+  --color-clay-600: #242321;
+  --color-clay-700: #171615;
+  --color-clay-900: #0b0b0a;
 
-  /* Moss — a quiet secondary, used for lower-impact messaging */
-  --color-moss-100: #e6e9e0;
-  --color-moss-500: #6b7758;
-  --color-moss-700: #46503a;
-  --color-moss-900: #2b3123;
+  /*
+   * Moss is retained as a compatibility alias for the sustainability badge.
+   * It now shares the same warm-stone scale, keeping the UI strictly monochrome.
+   */
+  --color-moss-100: var(--color-clay-100);
+  --color-moss-500: var(--color-clay-500);
+  --color-moss-700: var(--color-clay-700);
+  --color-moss-900: var(--color-clay-900);
 
-  /* Status */
-  --color-success-100: #dcf0e4;
-  --color-success-500: #2f7d54;
-  --color-success-700: #1f5b3c;
-  --color-warning-100: #fbeed6;
-  --color-warning-500: #b07d1f;
-  --color-warning-700: #7c5713;
-  --color-danger-100: #f7e0dd;
-  --color-danger-500: #b4432f;
-  --color-danger-700: #872f20;
+  /*
+   * Status — mapped onto the 3-colour system rather than kept as their own
+   * hues. Every error/warning/success message in this codebase already
+   * carries an icon and text (the accessibility page's own stated rule:
+   * "colour is never the only carrier of meaning"), so collapsing these to
+   * black/white/cream loses no information a sighted user relied on.
+   *
+   *   success → dark ink (the theme's single high-contrast accent)
+   *   warning / danger → grey, differentiated by weight (warning lighter,
+   *     danger darker) since there is no second or third hue left to spend.
+   *
+   * The `-500` step in each scale is used unpaired (no `dark:` override) in
+   * several places already in the codebase, so it has to read clearly on
+   * *both* a light and a dark surface — unlike `-100`/`-700`, which are always
+   * reached for their own theme. That is why `-500` here is a true middle
+   * grey rather than following ink's own light-mode-biased steps.
+   */
+  --color-success-100: var(--color-clay-100);
+  --color-success-500: var(--color-clay-500);
+  --color-success-700: var(--color-clay-700);
+  --color-warning-100: var(--color-ink-100);
+  --color-warning-500: #707070;
+  --color-warning-700: var(--color-ink-800);
+  --color-danger-100: var(--color-ink-200);
+  --color-danger-500: #707070;
+  --color-danger-700: var(--color-ink-950);
 
-  /* Elevation — soft and warm rather than grey */
-  --shadow-xs: 0 1px 2px rgb(20 19 15 / 0.04);
-  --shadow-sm: 0 1px 3px rgb(20 19 15 / 0.06), 0 1px 2px rgb(20 19 15 / 0.04);
-  --shadow-md: 0 6px 16px -4px rgb(20 19 15 / 0.1), 0 2px 6px rgb(20 19 15 / 0.05);
-  --shadow-lg: 0 18px 40px -12px rgb(20 19 15 / 0.16), 0 6px 14px rgb(20 19 15 / 0.06);
-  --shadow-xl: 0 32px 70px -20px rgb(20 19 15 / 0.24);
+  /* Elevation — neutral grey, no warm cast */
+  --shadow-xs: 0 1px 2px rgb(15 15 15 / 0.04);
+  --shadow-sm: 0 1px 3px rgb(15 15 15 / 0.06), 0 1px 2px rgb(15 15 15 / 0.04);
+  --shadow-md: 0 6px 16px -4px rgb(15 15 15 / 0.1), 0 2px 6px rgb(15 15 15 / 0.05);
+  --shadow-lg: 0 18px 40px -12px rgb(15 15 15 / 0.16), 0 6px 14px rgb(15 15 15 / 0.06);
+  --shadow-xl: 0 32px 70px -20px rgb(15 15 15 / 0.24);
 
   /* Motion */
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
@@ -103,6 +123,21 @@
    */
   --animate-confetti-fly: confetti-fly 1.15s ease-out forwards;
   --animate-pop-in: pop-in 0.42s var(--ease-out-quint) both;
+
+  /**
+   * Order confirmation. See `components/checkout/order-confirmed-badge.tsx`.
+   *
+   * Three parts, deliberately sequenced rather than simultaneous: the disc lands,
+   * then the tick is drawn into it, then a ring expands away from the edge. Firing
+   * them together reads as one blunt pop; staggering them reads as something being
+   * completed, which is the whole point of the moment.
+   *
+   * `--animate-confirm-tick` animates `stroke-dashoffset`, the same technique the
+   * logo intro uses in `draw-line`.
+   */
+  --animate-confirm-disc: confirm-disc 0.5s var(--ease-out-quint) both;
+  --animate-confirm-tick: confirm-tick 0.4s var(--ease-out-quint) 0.28s both;
+  --animate-confirm-ring: confirm-ring 0.9s var(--ease-out-quint) 0.3s both;
 
   /**
    * Hero carousel departures. The banner leaving slides off and fades while the next
@@ -188,6 +223,53 @@
         0
       )
       scale(0.9) rotate(var(--spin));
+  }
+}
+
+/**
+ * Order confirmation, in three sequenced parts.
+ *
+ * The disc overshoots slightly so it lands rather than appears — the same
+ * reasoning as `pop-in` below, a touch slower because this one is the subject of
+ * the page rather than a chip in a corner.
+ */
+@keyframes confirm-disc {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Drawn, not revealed: the stroke travels the way a tick is written. */
+@keyframes confirm-tick {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/*
+ * A single ring leaving the disc. It fades as it grows, so it reads as a pulse
+ * dissipating rather than a border that failed to render.
+ */
+@keyframes confirm-ring {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
   }
 }
 
@@ -301,7 +383,7 @@
   --sem-content-muted: var(--color-ink-500);
   --sem-content-subtle: var(--color-ink-400);
 
-  --sem-line: #e5dfd5;
+  --sem-line: #e2e2e2;
   --sem-line-strong: var(--color-ink-200);
 
   --sem-accent: var(--color-clay-600);
@@ -310,34 +392,34 @@
   --sem-accent-soft: var(--color-clay-50);
 
   --sem-focus: var(--color-clay-600);
-  --sem-overlay: rgb(13 12 10 / 0.55);
+  --sem-overlay: rgb(10 10 10 / 0.55);
 }
 
 .dark {
   color-scheme: dark;
 
-  --sem-canvas: #0d0c0a;
-  --sem-surface: #171512;
-  --sem-surface-raised: #1e1c18;
-  --sem-surface-sunken: #100f0d;
+  --sem-canvas: #0a0a0a;
+  --sem-surface: #141414;
+  --sem-surface-raised: #1c1c1c;
+  --sem-surface-sunken: #0f0f0f;
 
   --sem-inverse: var(--color-bone-100);
   --sem-on-inverse: var(--color-ink-950);
 
-  --sem-content: #f1ede6;
-  --sem-content-muted: #a9a49a;
-  --sem-content-subtle: #807b71;
+  --sem-content: #ededed;
+  --sem-content-muted: #a3a3a3;
+  --sem-content-subtle: #7a7a7a;
 
-  --sem-line: #2d2a25;
-  --sem-line-strong: #423e37;
+  --sem-line: #2a2a2a;
+  --sem-line-strong: #3f3f3f;
 
   --sem-accent: var(--color-clay-300);
   --sem-accent-hover: var(--color-clay-200);
   --sem-on-accent: var(--color-ink-950);
-  --sem-accent-soft: #241a14;
+  --sem-accent-soft: #272522;
 
   --sem-focus: var(--color-clay-300);
-  --sem-overlay: rgb(5 5 4 / 0.7);
+  --sem-overlay: rgb(4 4 4 / 0.7);
 }
 
 /**
@@ -404,6 +486,24 @@
 
   body {
     background-color: var(--sem-canvas);
+    /*
+     * A faint neutral wash down the page, so the space between the dark
+     * header and footer is not flat white/black. Fixed rather than
+     * scrolling, so it reads as one continuous tint behind the page rather than
+     * a band that repeats or visibly moves as you scroll a long page. Kept very
+     * light (`clay-50`/`clay-900` at low opacity) because every card, panel and
+     * modal on the page sits on its own explicit `bg-surface`/`bg-canvas` —
+     * this only needs to tint the margins around them, not compete with body
+     * text contrast.
+     */
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-clay-500) 16%, transparent) 0%,
+      color-mix(in srgb, var(--color-clay-500) 4%, transparent) 30%,
+      color-mix(in srgb, var(--color-clay-500) 4%, transparent) 70%,
+      color-mix(in srgb, var(--color-clay-500) 16%, transparent) 100%
+    );
+    background-attachment: fixed;
     color: var(--sem-content);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -950,4 +1050,245 @@
 [data-intro="seen"] [data-brand-target] {
   animation: none;
   opacity: 1;
+}
+
+/* ============================================================
+   2026 STOREFRONT REFINEMENT — QUIET LUXURY
+   A warmer, editorial layer shared by every customer-facing route.
+   ============================================================ */
+:root {
+  --color-ink-950: #0b0b0b;
+  --color-ink-900: #171717;
+  --color-ink-800: #262626;
+  --color-ink-700: #3d3d3d;
+  --color-ink-600: #555555;
+  --color-ink-500: #6f6f6f;
+  --color-ink-400: #909090;
+  --color-ink-300: #b1b1b1;
+  --color-ink-200: #d2d2d2;
+  --color-ink-100: #e9e9e9;
+
+  --color-bone-50: #fffdf8;
+  --color-bone-100: #faf7f0;
+  --color-bone-200: #f1ece2;
+  --color-bone-300: #e5ded1;
+  --color-bone-400: #d4cabb;
+
+  --color-clay-50: #f5f2eb;
+  --color-clay-100: #e9e4da;
+  --color-clay-200: #d3cbc0;
+  --color-clay-300: #aaa39a;
+  --color-clay-500: #625e58;
+  --color-clay-600: #242321;
+  --color-clay-700: #171615;
+  --color-clay-900: #0b0b0a;
+
+  --sem-canvas: #f8f5ee;
+  --sem-surface: #fffdf9;
+  --sem-surface-raised: #ffffff;
+  --sem-surface-sunken: #eee9df;
+  --sem-content: #171717;
+  --sem-content-muted: #68645f;
+  --sem-content-subtle: #8d8983;
+  --sem-line: #e2ddd3;
+  --sem-line-strong: #cfc7ba;
+  --sem-inverse: #111111;
+  --sem-on-inverse: #fbf8f1;
+  --sem-accent: #242321;
+  --sem-accent-hover: #0b0b0b;
+  --sem-accent-soft: #eee9df;
+
+  --shadow-xs: 0 1px 2px rgb(20 18 16 / 0.04);
+  --shadow-sm: 0 2px 8px rgb(20 18 16 / 0.06);
+  --shadow-md: 0 14px 35px -18px rgb(20 18 16 / 0.3), 0 3px 12px rgb(20 18 16 / 0.06);
+  --shadow-lg: 0 28px 65px -28px rgb(20 18 16 / 0.38), 0 8px 24px rgb(20 18 16 / 0.07);
+  --shadow-xl: 0 42px 90px -36px rgb(20 18 16 / 0.45);
+}
+
+.dark {
+  --sem-canvas: #0d0d0d;
+  --sem-surface: #151515;
+  --sem-surface-raised: #1c1c1c;
+  --sem-surface-sunken: #0a0a0a;
+  --sem-content: #f2eee7;
+  --sem-content-muted: #b4afa8;
+  --sem-content-subtle: #85817b;
+  --sem-line: #2c2a27;
+  --sem-line-strong: #44413d;
+  --sem-inverse: #f2eee5;
+  --sem-on-inverse: #111111;
+  --sem-accent: #f0ebe2;
+  --sem-accent-hover: #ffffff;
+  --sem-accent-soft: #282521;
+}
+
+@layer base {
+  body {
+    background-image:
+      radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--sem-accent) 7%, transparent) 0, transparent 28rem),
+      radial-gradient(circle at 88% 30%, color-mix(in srgb, var(--color-bone-400) 18%, transparent) 0, transparent 34rem);
+    background-attachment: fixed;
+  }
+
+  .storefront-main :where(h1, h2, h3, h4) {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.025em;
+  }
+
+  p,
+  li {
+    text-wrap: pretty;
+  }
+
+  :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--sem-focus);
+    outline-offset: 3px;
+  }
+}
+
+@layer utilities {
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--sem-accent);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+
+  .eyebrow::before {
+    width: 1.75rem;
+    height: 1px;
+    background: currentColor;
+    content: "";
+    opacity: 0.65;
+  }
+
+  .paper-panel {
+    border: 1px solid var(--sem-line);
+    border-radius: 1.5rem;
+    background: color-mix(in srgb, var(--sem-surface) 94%, transparent);
+    box-shadow: var(--shadow-md);
+  }
+}
+
+/* ============================================================
+   ADMIN WORKSPACE
+   A compact operational theme, scoped so the storefront keeps
+   its warmer editorial treatment.
+   ============================================================ */
+.admin-theme {
+  --sem-canvas: #f4f2ed;
+  --sem-surface: #ffffff;
+  --sem-surface-raised: #ffffff;
+  --sem-surface-sunken: #ece8df;
+  --sem-content: #171717;
+  --sem-content-muted: #68645f;
+  --sem-content-subtle: #8d8983;
+  --sem-line: #dfdad1;
+  --sem-line-strong: #c9c1b6;
+  --sem-inverse: #151515;
+  --sem-on-inverse: #faf7f0;
+  --sem-accent: #242321;
+  --sem-accent-hover: #090909;
+  --sem-accent-soft: #ece8df;
+  --sem-focus: #242321;
+  --sem-overlay: rgb(10 10 10 / 0.58);
+  --color-success-100: #eeeae2;
+  --color-success-500: #5f5b55;
+  --color-success-700: #2d2b29;
+  --color-warning-100: #e5e1da;
+  --color-warning-500: #77736d;
+  --color-warning-700: #3d3b38;
+  --color-danger-100: #d8d4ce;
+  --color-danger-500: #55514c;
+  --color-danger-700: #171717;
+
+  min-height: 100%;
+  background: var(--sem-canvas);
+  color: var(--sem-content);
+  font-family: var(--font-sans);
+}
+
+.dark .admin-theme {
+  --sem-canvas: #0c0c0c;
+  --sem-surface: #151515;
+  --sem-surface-raised: #1c1c1c;
+  --sem-surface-sunken: #0f0f0f;
+  --sem-content: #f1eee8;
+  --sem-content-muted: #b4afa8;
+  --sem-content-subtle: #827e78;
+  --sem-line: #2d2b28;
+  --sem-line-strong: #45413c;
+  --sem-inverse: #f1ece3;
+  --sem-on-inverse: #111111;
+  --sem-accent: #f1ece3;
+  --sem-accent-hover: #ffffff;
+  --sem-accent-soft: #2a2723;
+  --sem-focus: #f1ece3;
+}
+
+@layer base {
+  .admin-theme :where(h1, h2, h3, h4) {
+    font-family: var(--font-sans);
+    letter-spacing: -0.02em;
+  }
+
+  .admin-theme :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    border-radius: 0.625rem;
+  }
+
+  .admin-theme :where(input[type="checkbox"], input[type="radio"]) {
+    accent-color: var(--sem-accent);
+  }
+
+  .admin-theme table thead {
+    background: color-mix(in srgb, var(--sem-surface-sunken) 82%, transparent);
+  }
+
+  .admin-theme table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    white-space: nowrap;
+  }
+
+  .admin-theme table tbody tr {
+    transition: background-color 160ms ease;
+  }
+
+  .admin-theme table tbody tr:hover {
+    background: color-mix(in srgb, var(--sem-accent-soft) 58%, transparent);
+  }
+
+  .admin-theme code {
+    border-radius: 0.3rem;
+    background: var(--sem-surface-sunken);
+    padding: 0.12rem 0.3rem;
+  }
+}
+
+@layer utilities {
+  .admin-main h1 {
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .admin-main > div {
+    animation: fade-in 280ms ease-out both;
+  }
+
+  .admin-surface {
+    overflow: hidden;
+    border: 1px solid var(--sem-line);
+    border-radius: 1rem;
+    background: var(--sem-surface);
+    box-shadow: 0 1px 2px rgb(20 18 16 / 0.04), 0 8px 30px -24px rgb(20 18 16 / 0.3);
+  }
 }

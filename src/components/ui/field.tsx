@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * usual giveaway that a component was replaced rather than designed.
  */
 export const CONTROL =
-  "w-full border bg-surface px-3.5 py-3 text-sm text-content placeholder:text-content-subtle transition-colors focus:border-accent focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-content-subtle";
+  "w-full rounded-xl border bg-surface px-4 py-3.5 text-sm text-content shadow-xs placeholder:text-content-subtle transition-[border-color,background-color,box-shadow] duration-200 hover:border-line-strong focus:border-accent focus:bg-surface-raised focus:outline-none focus-visible:outline-none focus:shadow-md disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-content-subtle";
 
 interface FieldShellProps {
   label: string;
@@ -55,7 +55,7 @@ export function FieldShell({
         {label}
         {required ? (
           <>
-            <span aria-hidden className="ml-1 text-danger-500">
+            <span aria-hidden className="ml-1 text-danger-500 dark:text-danger-100">
               *
             </span>
             <span className="sr-only"> (required)</span>
@@ -244,8 +244,8 @@ export function RadioCard({
     <label
       htmlFor={fieldId}
       className={cn(
-        "flex cursor-pointer items-start gap-3 border p-4 transition-colors",
-        "border-line-strong has-checked:border-accent has-checked:bg-accent-soft",
+        "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-[border-color,background-color,box-shadow]",
+        "border-line-strong bg-surface shadow-xs has-checked:border-accent has-checked:bg-accent-soft has-checked:shadow-sm",
         "has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus",
         className,
       )}

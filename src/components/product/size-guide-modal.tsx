@@ -2,22 +2,32 @@
 
 import { useState } from "react";
 import { Ruler } from "@phosphor-icons/react";
-import { Modal } from "@/components/ui/modal";
-import { sizeGuides } from "@/lib/config";
+import { Drawer } from "@/components/ui/drawer";
+import { guideForSystem } from "@/lib/size-guide";
 import type { SizeSystem } from "@/lib/types";
+import { SizeGuideContent } from "./size-guide-content";
 
 /**
- * Size guide trigger + dialog.
+ * Size guide trigger and the drawer it opens.
  *
- * Placed next to the size picker rather than buried in a tab, because "which size
- * am I?" is the question that stops a purchase. The table is a real `<table>` with
- * scope attributes so it is navigable with a screen reader.
+ * Placed next to the size picker rather than buried in a tab, because "which size am I?" is
+ * the question that stops a purchase. A side drawer rather than a centred dialog so the
+ * product, and the size buttons it is about, stay in view beside the chart on a wide screen.
+ *
+ * Shows nothing for a product that has no chart (one size, shoes) instead of a chart for
+ * something else.
  */
-export function SizeGuideModal({ system }: { system: SizeSystem }) {
+export function SizeGuideModal({
+  system,
+  selectedSize,
+}: {
+  system: SizeSystem;
+  /** The size chosen on the product so far; its row is marked in the chart. */
+  selectedSize?: string | null;
+}) {
   const [open, setOpen] = useState(false);
-  const guide = system === "waist" ? sizeGuides.waist : sizeGuides.alpha;
 
-  if (system === "one-size") return null;
+  if (!guideForSystem(system)) return null;
 
   return (
     <>
@@ -30,97 +40,18 @@ export function SizeGuideModal({ system }: { system: SizeSystem }) {
         <span className="link-underline">Size guide</span>
       </button>
 
-      <Modal
+      <Drawer
         open={open}
         onClose={() => setOpen(false)}
         title="Size guide"
-        description={guide.label}
-        size="lg"
+        widthClass="w-full sm:max-w-[44rem]"
       >
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <caption className="sr-only">
-              {guide.label} — body measurements in inches
-            </caption>
-            <thead>
-              <tr className="border-b border-line-strong">
-                {guide.columns.map((column) => (
-                  <th
-                    key={column}
-                    scope="col"
-                    className="whitespace-nowrap px-3 py-3 text-left text-2xs font-medium uppercase tracking-[0.1em] text-content-muted"
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {guide.rows.map((row) => (
-                <tr key={row[0]} className="border-b border-line last:border-0">
-                  {row.map((cell, cellIndex) =>
-                    cellIndex === 0 ? (
-                      <th
-                        key={cell}
-                        scope="row"
-                        className="whitespace-nowrap px-3 py-3 text-left font-medium text-content"
-                      >
-                        {cell}
-                      </th>
-                    ) : (
-                      <td
-                        key={`${row[0]}-${cellIndex}`}
-                        data-numeric
-                        className="whitespace-nowrap px-3 py-3 text-content-muted"
-                      >
-                        {cell}
-                      </td>
-                    ),
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="mt-8 grid gap-6 border-t border-line pt-6 sm:grid-cols-2">
-          <div>
-            <h3 className="font-sans text-2xs font-medium uppercase tracking-[0.12em]">
-              How to measure
-            </h3>
-            <ul className="mt-3 flex flex-col gap-2 text-sm text-content-muted">
-              <li>
-                <strong className="font-medium text-content">Chest</strong> — around the
-                fullest part, under the arms, tape level.
-              </li>
-              <li>
-                <strong className="font-medium text-content">Waist</strong> — at your
-                natural waist, the narrowest point.
-              </li>
-              <li>
-                <strong className="font-medium text-content">Hip</strong> — around the
-                fullest part, roughly 8&quot; below the waist.
-              </li>
-              <li>
-                <strong className="font-medium text-content">Inseam</strong> — from the
-                crotch seam to the hem of a trouser that fits you.
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="font-sans text-2xs font-medium uppercase tracking-[0.12em]">
-              Between sizes?
-            </h3>
-            <p className="mt-3 text-sm leading-relaxed text-content-muted">
-              Size up for outerwear and knitwear if you plan to layer; size down for a
-              closer fit in jersey, which relaxes with wear. If you are still unsure,
-              email us your measurements and we will tell you which size we would send —
-              usually within a couple of hours.
-            </p>
-          </div>
-        </div>
-      </Modal>
+        <SizeGuideContent
+          system={system}
+          selectedSize={selectedSize}
+          className="px-5 pb-10 pt-4 sm:px-8"
+        />
+      </Drawer>
     </>
   );
 }

@@ -57,8 +57,8 @@ export function ProductCard({
 
 
   return (
-    <article className={cn("group relative flex flex-col", className)}>
-      <div className="relative overflow-hidden bg-surface-sunken">
+    <article className={cn("group relative flex flex-col rounded-[1.25rem]", className)}>
+      <div className="relative overflow-hidden rounded-[1.25rem] border border-line bg-surface-sunken shadow-sm transition-[border-color,box-shadow,transform] duration-500 ease-out group-hover:-translate-y-1 group-hover:border-line-strong group-hover:shadow-lg">
         <Link
           href={href}
           aria-label={`${product.name} in ${activeColor.name}`}
@@ -116,8 +116,7 @@ export function ProductCard({
               : `Save ${product.name} for later`
           }
           className={cn(
-            "absolute right-2 top-2 grid size-11 place-items-center rounded-full transition-colors",
-            "text-content hover:bg-surface/90 focus-visible:bg-surface/90",
+            "absolute right-2.5 top-2.5 grid size-10 place-items-center rounded-full border border-white/30 bg-surface/75 text-content shadow-sm backdrop-blur-md transition-[background-color,color,transform] hover:scale-105 hover:bg-surface focus-visible:bg-surface",
             saved && "text-danger-500 dark:text-clay-300",
           )}
         >
@@ -134,7 +133,7 @@ export function ProductCard({
               "lg:block",
             )}
           >
-            <div className="border border-line bg-surface/95 p-2 backdrop-blur-sm">
+            <div className="rounded-xl border border-line bg-surface/95 p-2.5 shadow-lg backdrop-blur-md">
               <p className="mb-1.5 px-1 text-2xs uppercase tracking-[0.12em] text-content-muted">
                 Quick add
               </p>
@@ -160,7 +159,7 @@ export function ProductCard({
       </div>
 
       {/* Detail */}
-      <div className="mt-3.5 flex flex-1 flex-col">
+      <div className="mt-4 flex flex-1 flex-col px-1">
         <div className="flex items-start justify-between gap-3">
           <h3 className="font-sans text-sm font-medium leading-snug tracking-normal">
             <Link href={href} className="hover:text-accent">

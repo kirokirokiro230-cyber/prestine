@@ -4,7 +4,6 @@ import { useActionState, useState } from "react";
 import { Truck } from "@phosphor-icons/react";
 import {
   addOrderNoteAction,
-  setTrackingAction,
   updateOrderStatusAction,
   type OrderActionState,
 } from "@/app/admin/actions/orders";
@@ -20,8 +19,6 @@ import { FormFeedback, Panel, SubmitButton } from "./primitives";
  * terminal, so the panel becomes read-only rather than showing buttons that would
  * be rejected.
  */
-
-const CARRIERS = ["DPD", "Royal Mail", "DHL", "UPS", "FedEx", "Evri", "Other"];
 
 /** Mirrors the server transition table in `repositories/orders.ts`. */
 const NEXT_STATUSES: Record<Order["status"], Order["status"][]> = {
@@ -42,10 +39,6 @@ export function OrderFulfilment({
     updateOrderStatusAction,
     {},
   );
-  const [trackingState, trackingAction] = useActionState<OrderActionState, FormData>(
-    setTrackingAction,
-    {},
-  );
   const [noteState, noteAction] = useActionState<OrderActionState, FormData>(
     addOrderNoteAction,
     {},
@@ -63,7 +56,7 @@ export function OrderFulfilment({
         description={
           terminal
             ? `This order is ${order.status}. No further status changes are possible.`
-            : "Moving to shipped requires a tracking number, so the customer always gets one."
+            : "Delhivery normally advances this on its own as the parcel is scanned. Use these controls to correct it or to cancel."
         }
       >
         <FormFeedback error={statusState.error} success={statusState.success} />
@@ -92,28 +85,6 @@ export function OrderFulfilment({
               }))}
               className="max-w-sm"
             />
-
-            {nextStatus === "shipped" ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <SelectField
-                  label="Carrier"
-                  name="carrier"
-                  defaultValue={order.carrier ?? CARRIERS[0]}
-                  options={CARRIERS.map((carrier) => ({ value: carrier, label: carrier }))}
-                />
-                <TextField
-                  label="Tracking number"
-                  name="trackingNumber"
-                  defaultValue={order.trackingNumber}
-                  required
-                />
-              </div>
-            ) : (
-              <>
-                <input type="hidden" name="carrier" value={order.carrier ?? ""} />
-                <input type="hidden" name="trackingNumber" value={order.trackingNumber ?? ""} />
-              </>
-            )}
 
             {nextStatus === "cancelled" ? (
               <>
@@ -171,34 +142,6 @@ export function OrderFulfilment({
           </form>
         )}
       </Panel>
-
-      {/* Tracking, editable independently of status */}
-      {order.status !== "cancelled" ? (
-        <Panel
-          title="Tracking"
-          description="Correct a carrier or reference without changing the order status."
-        >
-          <FormFeedback error={trackingState.error} success={trackingState.success} />
-
-          <form action={trackingAction} className="mt-2 grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-            <input type="hidden" name="id" value={order.id} />
-            <SelectField
-              label="Carrier"
-              name="carrier"
-              defaultValue={order.carrier ?? CARRIERS[0]}
-              options={CARRIERS.map((carrier) => ({ value: carrier, label: carrier }))}
-            />
-            <TextField
-              label="Tracking number"
-              name="trackingNumber"
-              defaultValue={order.trackingNumber}
-            />
-            <SubmitButton disabled={!canWrite} variant="secondary" pendingLabel="Saving…">
-              Save tracking
-            </SubmitButton>
-          </form>
-        </Panel>
-      ) : null}
 
       <Panel title="Add a note" description="Internal only. Useful for exchange and refund context.">
         <FormFeedback error={noteState.error} success={noteState.success} />

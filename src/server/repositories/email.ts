@@ -1,53 +1,77 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, lte } from "drizzle-orm";
 import { emailTemplates as seedTemplates } from "@/lib/config";
 import type { EmailRecord, EmailTemplate, EmailTemplateKey, Order } from "@/lib/types";
-import { getDb, isDatabaseConfigured } from "../db/client";
-import { fromEmailRecord, fromEmailTemplate, toEmailRecord, toEmailTemplate, toOrder } from "../db/mappers";
-import { emailLog, emailTemplates, orderLines, orders as ordersTable } from "../db/schema";
+import { db, insertInto, unwrap, updateTable } from "../supabase";
+import type { EmailLogRow, EmailTemplateRow } from "../database.types";
+import { listOrders } from "./orders";
 import { getSettings } from "./settings";
-import { mutateStore, readStore } from "../store";
 
 /**
  * Email templates and the send log.
  *
- * Templates behave like settings: seeded from `config.ts`, then owned by the store so a
- * merchant can rewrite a confirmation without a deploy. The log behaves like the audit
- * trail — append-only, capped, newest first.
- *
- * Two backends, chosen by whether a database is configured — see `login-attempts.ts`
- * for the precedent.
+ * Templates behave like settings: seeded once by
+ * `supabase/migrations/00000000000004_seed.sql`, then owned by the
+ * `email_templates` table so a merchant can rewrite a confirmation without a
+ * deploy. The log behaves like the audit trail — append-only, capped, newest
+ * first — except the cap is now enforced by `recordEmail` trimming after
+ * insert rather than by an in-memory array slice, since a table has no
+ * "keep only the first N" primitive of its own.
  */
 
 /**
  * How many send records to keep.
  *
  * Matches the audit cap. Large enough to answer "did last week's orders get their
- * confirmations", small enough that the JSON document does not grow without bound —
- * the whole store is rewritten on every mutation, so an uncapped log would make every
- * admin action progressively slower. Against Postgres the same cap keeps the admin
- * log page fast without needing an index-only scan of the whole table.
+ * confirmations", small enough that the table does not grow without bound for a
+ * store that never prunes it.
  */
 const MAX_LOG_ENTRIES = 500;
 
-export async function listEmailTemplates(): Promise<EmailTemplate[]> {
-  if (!isDatabaseConfigured()) {
-    return [...(await readStore()).emailTemplates];
-  }
+function templateFromRow(row: EmailTemplateRow): EmailTemplate {
+  return {
+    key: row.key,
+    enabled: row.enabled,
+    subject: row.subject,
+    heading: row.heading,
+    body: row.body,
+  };
+}
 
-  const rows = await getDb().select().from(emailTemplates);
-  return rows.map(toEmailTemplate);
+function recordFromRow(row: EmailLogRow): EmailRecord {
+  return {
+    id: row.id,
+    at: row.at,
+    to: row.to,
+    subject: row.subject,
+    templateKey: row.template_key,
+    orderId: row.order_id ?? undefined,
+    status: row.status,
+    error: row.error ?? undefined,
+  };
+}
+
+export async function listEmailTemplates(): Promise<EmailTemplate[]> {
+  const rows = unwrap(
+    await db()
+      .from("email_templates")
+      .select("*")
+      .overrideTypes<EmailTemplateRow[], { merge: false }>(),
+  );
+  return rows.map(templateFromRow);
 }
 
 export async function getEmailTemplate(
   key: EmailTemplateKey,
 ): Promise<EmailTemplate | undefined> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).emailTemplates.find((template) => template.key === key);
-  }
-
-  const [row] = await getDb().select().from(emailTemplates).where(eq(emailTemplates.key, key));
-  return row ? toEmailTemplate(row) : undefined;
+  const row = unwrap(
+    await db()
+      .from("email_templates")
+      .select("*")
+      .eq("key", key)
+      .maybeSingle()
+      .overrideTypes<EmailTemplateRow, { merge: false }>(),
+  );
+  return row ? templateFromRow(row) : undefined;
 }
 
 export interface EmailTemplateInput {
@@ -70,35 +94,21 @@ export async function updateEmailTemplate(
 ): Promise<EmailTemplate> {
   if (!input.subject.trim()) throw new Error("A subject line is required.");
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const template = store.emailTemplates.find((entry) => entry.key === key);
-      if (!template) throw new Error(`Email template ${key} not found`);
+  const row = unwrap(
+    await updateTable(db(), "email_templates", {
+      enabled: input.enabled,
+      subject: input.subject.trim(),
+      heading: input.heading.trim(),
+      body: input.body,
+    })
+      .eq("key", key)
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as EmailTemplateRow | null;
 
-      template.enabled = input.enabled;
-      template.subject = input.subject.trim();
-      template.heading = input.heading.trim();
-      template.body = input.body;
-
-      return template;
-    });
-  }
-
-  const next: EmailTemplate = {
-    key,
-    enabled: input.enabled,
-    subject: input.subject.trim(),
-    heading: input.heading.trim(),
-    body: input.body,
-  };
-
-  const [row] = await getDb()
-    .update(emailTemplates)
-    .set(fromEmailTemplate(next))
-    .where(eq(emailTemplates.key, key))
-    .returning();
   if (!row) throw new Error(`Email template ${key} not found`);
-  return toEmailTemplate(row);
+  return templateFromRow(row);
 }
 
 /** Restore the shipped copy for one template, keeping its enabled state. */
@@ -106,40 +116,23 @@ export async function resetEmailTemplate(key: EmailTemplateKey): Promise<EmailTe
   const seeded = seedTemplates.find((entry) => entry.key === key);
   if (!seeded) throw new Error(`Email template ${key} has no default`);
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      const template = store.emailTemplates.find((entry) => entry.key === key);
-      if (!template) throw new Error(`Email template ${key} not found`);
+  const row = unwrap(
+    await updateTable(db(), "email_templates", {
+      subject: seeded.subject,
+      heading: seeded.heading,
+      body: seeded.body,
+      // `enabled` is a deliberate operational choice, not copy. Resetting words
+      // should not silently switch an email a merchant turned off back on —
+      // omitted here rather than written, so the existing value is untouched.
+    })
+      .eq("key", key)
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as EmailTemplateRow | null;
 
-      template.subject = seeded.subject;
-      template.heading = seeded.heading;
-      template.body = seeded.body;
-      // `enabled` is a deliberate operational choice, not copy. Resetting words should
-      // not silently switch an email a merchant turned off back on.
-
-      return template;
-    });
-  }
-
-  const db = getDb();
-  const [current] = await db.select().from(emailTemplates).where(eq(emailTemplates.key, key));
-  if (!current) throw new Error(`Email template ${key} not found`);
-
-  const next: EmailTemplate = {
-    key,
-    // `enabled` is a deliberate operational choice, not copy — carried over, not reset.
-    enabled: current.enabled,
-    subject: seeded.subject,
-    heading: seeded.heading,
-    body: seeded.body,
-  };
-
-  const [row] = await db
-    .update(emailTemplates)
-    .set(fromEmailTemplate(next))
-    .where(eq(emailTemplates.key, key))
-    .returning();
-  return toEmailTemplate(row);
+  if (!row) throw new Error(`Email template ${key} not found`);
+  return templateFromRow(row);
 }
 
 /* ------------------------------------------------------------------ */
@@ -147,65 +140,68 @@ export async function resetEmailTemplate(key: EmailTemplateKey): Promise<EmailTe
 /* ------------------------------------------------------------------ */
 
 export async function listEmailLog(limit = 100): Promise<EmailRecord[]> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).emailLog.slice(0, limit);
-  }
-
-  const rows = await getDb().select().from(emailLog).orderBy(desc(emailLog.at)).limit(limit);
-  return rows.map(toEmailRecord);
+  const rows = unwrap(
+    await db()
+      .from("email_log")
+      .select("*")
+      .order("at", { ascending: false })
+      .limit(limit)
+      .overrideTypes<EmailLogRow[], { merge: false }>(),
+  );
+  return rows.map(recordFromRow);
 }
 
 /** Send records for one order, newest first. Shown on the admin order page. */
 export async function emailLogForOrder(orderId: string): Promise<EmailRecord[]> {
-  if (!isDatabaseConfigured()) {
-    return (await readStore()).emailLog.filter((entry) => entry.orderId === orderId);
-  }
-
-  const rows = await getDb()
-    .select()
-    .from(emailLog)
-    .where(eq(emailLog.orderId, orderId))
-    .orderBy(desc(emailLog.at));
-  return rows.map(toEmailRecord);
+  const rows = unwrap(
+    await db()
+      .from("email_log")
+      .select("*")
+      .eq("order_id", orderId)
+      .order("at", { ascending: false })
+      .overrideTypes<EmailLogRow[], { merge: false }>(),
+  );
+  return rows.map(recordFromRow);
 }
 
 export async function recordEmail(
   entry: Omit<EmailRecord, "id" | "at">,
 ): Promise<EmailRecord> {
-  const record: EmailRecord = {
-    id: `eml_${randomUUID().slice(0, 8)}`,
-    at: new Date().toISOString(),
-    ...entry,
-  };
+  const row = unwrap(
+    await insertInto(db(), "email_log", {
+      id: `eml_${randomUUID().slice(0, 8)}`,
+      to: entry.to,
+      subject: entry.subject,
+      template_key: entry.templateKey,
+      order_id: entry.orderId ?? null,
+      status: entry.status,
+      error: entry.error ?? null,
+    })
+      .select("*")
+      .single()
+      .overrideTypes<unknown, { merge: false }>(),
+  ) as EmailLogRow;
 
-  if (!isDatabaseConfigured()) {
-    return mutateStore((store) => {
-      store.emailLog.unshift(record);
-      if (store.emailLog.length > MAX_LOG_ENTRIES) {
-        store.emailLog = store.emailLog.slice(0, MAX_LOG_ENTRIES);
-      }
-      return record;
-    });
-  }
-
-  const db = getDb();
-  await db.insert(emailLog).values(fromEmailRecord(record));
-
-  // Cap the table the same way the JSON store caps the array: keep the newest
-  // MAX_LOG_ENTRIES rows, drop the rest. Cheap here because it only runs on a write,
-  // not on every read.
-  const overflow = await db
-    .select({ id: emailLog.id })
-    .from(emailLog)
-    .orderBy(desc(emailLog.at))
-    .offset(MAX_LOG_ENTRIES);
+  // Cap the log at MAX_LOG_ENTRIES, oldest rows first. Deleting after insert
+  // rather than trimming an in-memory array — a table has no "keep only the
+  // most recent N" primitive, so this is one extra query per send, no worse
+  // than the audit trail's own equivalent trim in `src/server/audit.ts`.
+  const overflow = unwrap(
+    await db()
+      .from("email_log")
+      .select("id")
+      .order("at", { ascending: false })
+      .range(MAX_LOG_ENTRIES, MAX_LOG_ENTRIES + 999)
+      .overrideTypes<Array<{ id: string }>, { merge: false }>(),
+  );
   if (overflow.length > 0) {
-    for (const row of overflow) {
-      await db.delete(emailLog).where(eq(emailLog.id, row.id));
-    }
+    await db()
+      .from("email_log")
+      .delete()
+      .in("id", overflow.map((entry) => entry.id));
   }
 
-  return record;
+  return recordFromRow(row);
 }
 
 /* ------------------------------------------------------------------ */
@@ -222,18 +218,10 @@ export async function recordEmail(
  * way so a genuine miss is still visible.
  */
 export async function markReviewRequested(orderId: string): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    await mutateStore((store) => {
-      const order = store.orders.find((entry) => entry.id === orderId);
-      if (order) order.reviewRequestedAt = new Date().toISOString();
-    });
-    return;
-  }
-
-  await getDb()
-    .update(ordersTable)
-    .set({ reviewRequestedAt: new Date() })
-    .where(eq(ordersTable.id, orderId));
+  const { error } = await updateTable(db(), "orders", {
+    review_requested_at: new Date().toISOString(),
+  }).eq("id", orderId);
+  if (error) throw new Error(error.message);
 }
 
 /**
@@ -246,50 +234,28 @@ export async function markReviewRequested(orderId: string): Promise<void> {
  *
  * An order with no email address is also skipped. Legacy orders predate the checkout
  * capturing one, and there is nowhere to send it.
+ *
+ * The `status = 'delivered' and review_requested_at is null` half of this filter is
+ * exactly what `orders_review_due_idx` (a partial index — see
+ * `supabase/migrations/00000000000001_schema.sql`) was built for; the delay-day
+ * arithmetic still has to happen in application code because it depends on the
+ * live `settings.review_request_delay_days`, which cannot be baked into the index.
  */
 export async function dueReviewRequests(now = new Date()): Promise<Order[]> {
-  if (!isDatabaseConfigured()) {
-    const { orders, settings } = await readStore();
-    const delayMs = Math.max(0, settings.reviewRequestDelayDays) * 86_400_000;
-
-    return orders.filter((order) => {
-      if (order.status !== "delivered") return false;
-      if (order.reviewRequestedAt) return false;
-      if (!order.email) return false;
-      if (!order.deliveredAt) return false;
-
-      const deliveredAt = Date.parse(order.deliveredAt);
-      if (Number.isNaN(deliveredAt)) return false;
-
-      return deliveredAt + delayMs <= now.getTime();
-    });
-  }
-
   const settings = await getSettings();
   const delayMs = Math.max(0, settings.reviewRequestDelayDays) * 86_400_000;
-  const cutoff = new Date(now.getTime() - delayMs);
 
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(ordersTable)
-    .where(
-      and(
-        eq(ordersTable.status, "delivered"),
-        isNull(ordersTable.reviewRequestedAt),
-        lte(ordersTable.deliveredAt, cutoff),
-      ),
-    );
+  const orders = await listOrders();
 
-  // `email` is nullable and not filterable with a plain `isNotNull` combined cleanly
-  // above without a second round trip either way, so it is checked here alongside the
-  // "legacy record" skip that a missing `deliveredAt` also needs — both are the same
-  // "this row predates the feature" case the JSON-store branch names explicitly.
-  const withEmail = rows.filter((row) => Boolean(row.email) && row.deliveredAt !== null);
-  if (withEmail.length === 0) return [];
+  return orders.filter((order) => {
+    if (order.status !== "delivered") return false;
+    if (order.reviewRequestedAt) return false;
+    if (!order.email) return false;
+    if (!order.deliveredAt) return false;
 
-  const lines = await db.select().from(orderLines);
-  return withEmail.map((row) =>
-    toOrder(row, lines.filter((line) => line.orderId === row.id)),
-  );
+    const deliveredAt = Date.parse(order.deliveredAt);
+    if (Number.isNaN(deliveredAt)) return false;
+
+    return deliveredAt + delayMs <= now.getTime();
+  });
 }

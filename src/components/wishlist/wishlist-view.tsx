@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/modal";
 import { Price } from "@/components/ui/price";
 import { Rating } from "@/components/ui/rating";
 import { SectionHeading } from "@/components/ui/section-heading";
+import { ProductGridSkeleton, Skeleton } from "@/components/ui/skeleton";
 import { useProductSummaries } from "@/hooks/use-product-summaries";
 import { pluralise } from "@/lib/format";
 import { primaryBadge } from "@/lib/product-utils";
@@ -58,12 +59,14 @@ export function WishlistView({ recommendations }: { recommendations: Product[] }
 
   if (!hydrated || (entries.length > 0 && loading)) {
     return (
-      <div className="page-gutter mx-auto max-w-page py-10">
-        <div className="h-10 w-52 animate-shimmer bg-surface-sunken" />
-        <div className="mt-10 grid grid-cols-2 gap-6 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="aspect-3/4 animate-shimmer bg-surface-sunken" />
-          ))}
+      <div
+        className="page-gutter mx-auto max-w-page py-10"
+        role="status"
+        aria-label="Loading saved items"
+      >
+        <Skeleton className="h-10 w-52" />
+        <div className="mt-10">
+          <ProductGridSkeleton count={4} />
         </div>
       </div>
     );

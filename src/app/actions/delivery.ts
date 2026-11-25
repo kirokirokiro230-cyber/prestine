@@ -3,6 +3,7 @@
 import { deliveryWindow } from "@/lib/format";
 import { getSettings } from "@/server/repositories/settings";
 import { checkPincode, isValidPincode } from "@/server/delhivery";
+import { LIMITS, consumeIpRateLimit, rateLimitMessage } from "@/server/rate-limit";
 
 /**
  * "When will it reach me?" for the product page.
@@ -45,6 +46,13 @@ export async function estimateDeliveryAction(
   if (!isValidPincode(pincode)) {
     return { error: "Enter a valid 6-digit PIN code." };
   }
+
+  /*
+   * Each accepted lookup is a call to Delhivery against our account's quota.
+   * Counted after the format check, so typos do not consume the allowance.
+   */
+  const limited = await consumeIpRateLimit("pincode", LIMITS.pincodeLookup);
+  if (limited) return { error: rateLimitMessage(limited) };
 
   const [settings, service] = await Promise.all([getSettings(), checkPincode(pincode)]);
 

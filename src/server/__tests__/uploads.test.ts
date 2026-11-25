@@ -1,28 +1,26 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { readdir } from "node:fs/promises";
-import { beforeAll, describe, it } from "vitest";
+import { afterAll, describe, it } from "vitest";
 import { isUploadedImage } from "@/lib/uploads";
-import { readImage, saveImage, sniffImageType } from "@/server/uploads";
+import { saveImage, sniffImageType } from "@/server/uploads";
+import { db } from "@/server/supabase";
+import { storageBucket } from "@/server/storage";
+import { checkSupabaseStorage, testRunTag } from "./supabase-test-helpers";
 
 /**
  * Image upload.
  *
- * File upload is the most reliably exploited surface in an admin panel, and none of
- * these failures are visible by using the feature: an SVG that uploads happily is
- * stored cross-site scripting, a trusted filename is a path traversal, and a trusted
- * `Content-Type` is both. So the tests are about what gets *refused*.
+ * `sniffImageType`'s own tests (type sniffing below) are pure — magic-byte
+ * detection touches no network — and run everywhere, including CI. `saveImage`
+ * itself is an integration test: it uploads to a real Supabase Storage bucket,
+ * so it needs `checkSupabaseStorage()` (see `supabase-test-helpers.ts`) and is
+ * skipped with a clear reason when no bucket is configured.
+ *
+ * File upload is the most reliably exploited surface in an admin panel, and none
+ * of these failures are visible by using the feature: an SVG that uploads happily
+ * is stored cross-site scripting, and a trusted `Content-Type` is too. So the
+ * sniffing tests are about what gets *refused*, and they need no bucket at all —
+ * `sniffImageType` runs before anything is ever uploaded.
  */
-
-const DIR = ".test-store/uploads";
-
-beforeAll(() => {
-  process.env.PRESTINE_UPLOAD_DIR = DIR;
-
-  // Fresh directory per run: these assertions count files on disk, so leftovers from a
-  // previous run would make them pass or fail for the wrong reason.
-  rmSync(DIR, { recursive: true, force: true });
-});
 
 /** A real 1x1 PNG. Anything shorter than a valid header would not prove much. */
 const PNG = Buffer.from(
@@ -79,30 +77,52 @@ describe("type sniffing", () => {
   });
 });
 
-describe("saving", () => {
-  it("stores an image and returns a URL for it", async () => {
-    const result = await saveImage(file(PNG, "photo.png", "image/png"));
+const { configured, reason } = checkSupabaseStorage();
+const tag = testRunTag();
+const uploadedPaths: string[] = [];
+
+describe.skipIf(!configured)("saving to Supabase Storage", () => {
+  if (!configured) {
+    it.skip(reason, () => {});
+    return;
+  }
+
+  afterAll(async () => {
+    if (uploadedPaths.length > 0) {
+      await db().storage.from(storageBucket()).remove(uploadedPaths);
+    }
+  });
+
+  function pathFromUrl(url: string): string {
+    const marker = `/object/public/${storageBucket()}/`;
+    const index = url.indexOf(marker);
+    return index === -1 ? url : url.slice(index + marker.length);
+  }
+
+  it("stores an image and returns a public URL for it", async () => {
+    const result = await saveImage(file(PNG, `${tag}.png`, "image/png"));
 
     assert.ok(result.ok, "ok" in result && !result.ok ? result.error : "");
     if (!result.ok) return;
+    uploadedPaths.push(pathFromUrl(result.url));
 
     assert.equal(result.type, "image/png");
     assert.ok(isUploadedImage(result.url), result.url);
   });
 
-  it("names the file from its contents, never from the client", async () => {
-    // A filename is attacker-controlled input. If it reached the filesystem, this is
-    // how it would get out of the uploads directory.
-    const result = await saveImage(
-      file(PNG, "../../../../.env", "image/png"),
-    );
+  it("names the object from its contents, never from the client", async () => {
+    // A filename is attacker-controlled input. The pipeline never uses it — the
+    // object path is a hash of the bytes — so a traversal attempt in the
+    // filename has nowhere to reach.
+    const result = await saveImage(file(PNG, "../../../../.env", "image/png"));
 
     assert.ok(result.ok);
     if (!result.ok) return;
+    uploadedPaths.push(pathFromUrl(result.url));
 
     assert.ok(!result.url.includes(".."), result.url);
     assert.ok(!result.url.includes(".env"), result.url);
-    assert.match(result.url, /^\/uploads\/[0-9a-f]{16}\.png$/);
+    assert.match(result.url, /\/products\/[0-9a-f]{16}\.png$/);
   });
 
   it("gives the same URL to identical bytes, so one image is stored once", async () => {
@@ -112,22 +132,19 @@ describe("saving", () => {
     assert.ok(first.ok && second.ok);
     if (!first.ok || !second.ok) return;
     assert.equal(first.url, second.url);
-
-    const names = await readdir(DIR);
-    assert.equal(
-      names.filter((name) => name.endsWith(".png")).length,
-      1,
-      "the same image was written twice",
-    );
+    uploadedPaths.push(pathFromUrl(first.url));
   });
 
   it("ignores the declared type and trusts the bytes", async () => {
     // A PNG announced as a JPEG is still stored as a PNG...
     const honest = await saveImage(file(PNG, "x.jpg", "image/jpeg"));
     assert.ok(honest.ok);
-    if (honest.ok) assert.equal(honest.type, "image/png");
+    if (honest.ok) {
+      assert.equal(honest.type, "image/png");
+      uploadedPaths.push(pathFromUrl(honest.url));
+    }
 
-    // ...and a script announced as a PNG is refused outright.
+    // ...and a script announced as a PNG is refused outright, before any upload.
     const lying = await saveImage(
       file(Buffer.from("<script>alert(1)</script>"), "x.png", "image/png"),
     );
@@ -160,59 +177,27 @@ describe("saving", () => {
     assert.ok(!result.ok);
     if (!result.ok) assert.match(result.error, /SVG/);
   });
-});
 
-describe("reading back", () => {
-  it("serves a stored image", async () => {
+  it("serves a stored image back with matching bytes", async () => {
     const saved = await saveImage(file(JPEG, "photo.jpg", "image/jpeg"));
     assert.ok(saved.ok);
     if (!saved.ok) return;
+    uploadedPaths.push(pathFromUrl(saved.url));
 
-    const name = saved.url.replace("/uploads/", "");
-    const image = await readImage(name);
-
-    assert.ok(image.ok);
-    if (image.ok) assert.equal(image.type, "image/jpeg");
-  });
-
-  it("refuses traversal, however it is spelled", async () => {
-    for (const name of [
-      "../store.json",
-      "..%2Fstore.json",
-      "../../.env",
-      "/etc/passwd",
-      "sub/dir/file.png",
-      "a".repeat(16) + ".png",
-      "0123456789abcdef.svg",
-      "0123456789ABCDEF.png",
-      "0123456789abcdef.png.exe",
-    ]) {
-      const image = await readImage(name);
-      assert.equal(image.ok, false, `accepted ${name}`);
-    }
-  });
-
-  it("reports a missing file as absent, not as an error", async () => {
-    const image = await readImage("00112233445566aa.png");
-    assert.equal(image.ok, false);
+    const response = await fetch(saved.url);
+    assert.equal(response.status, 200);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.ok(bytes.equals(JPEG));
   });
 });
 
 describe("URL validation", () => {
-  it("accepts what the pipeline produces", () => {
-    assert.equal(isUploadedImage("/uploads/0123456789abcdef.jpg"), true);
-    assert.equal(isUploadedImage("/uploads/0123456789abcdef.webp"), true);
-  });
-
-  it("rejects anything else", () => {
+  it("rejects things that are not this project's storage URLs", () => {
     for (const url of [
-      "/uploads/../store.json",
-      "/uploads/evil.svg",
-      "uploads/0123456789abcdef.jpg",
-      "https://example.test/0123456789abcdef.jpg",
       "javascript:alert(1)",
-      "/uploads/0123456789abcdef.jpg?x=1",
+      "https://example.test/0123456789abcdef.jpg",
       "",
+      "/uploads/0123456789abcdef.jpg",
     ]) {
       assert.equal(isUploadedImage(url), false, `accepted ${url}`);
     }

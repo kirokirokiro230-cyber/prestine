@@ -6,6 +6,7 @@ import {
   type SettingsActionState,
 } from "@/app/admin/actions/settings";
 import { Checkbox, SelectField, TextArea, TextField } from "@/components/ui/field";
+import { formatReturnWindow } from "@/lib/returns";
 import type { StoreSettings } from "@/lib/types";
 import { FormFeedback, Panel, SubmitButton } from "./primitives";
 
@@ -136,13 +137,42 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
                   error={state.fieldErrors?.taxRate}
                   required
                 />
+                {/*
+                  Hours, not days: a 48-hour policy is the common one and "2 days"
+                  leaves open whether a parcel delivered at 23:00 has until 23:00 two
+                  days later or until the end of that day. The hint shows how the
+                  current value reads to a shopper, so a merchant typing 48 can see it
+                  will appear as "48 hours" rather than guessing.
+                */}
                 <TextField
-                  label="Return window (days)"
-                  name="returnWindowDays"
+                  label="Return window (hours)"
+                  name="returnWindowHours"
                   type="number"
                   min={0}
-                  defaultValue={String(settings.returnWindowDays)}
-                  error={state.fieldErrors?.returnWindowDays}
+                  max={8760}
+                  defaultValue={String(settings.returnWindowHours)}
+                  error={state.fieldErrors?.returnWindowHours}
+                  hint={`Shoppers see "${formatReturnWindow(settings.returnWindowHours)}". 48 for two days, 720 for thirty. Zero accepts no returns.`}
+                  required
+                />
+              </div>
+
+              {/*
+                Applied automatically at checkout to a signed-in customer's first order,
+                once per person, and not combined with a promotion code (the larger of the
+                two applies). Zero turns it off. Needs migration 21; before that the
+                value saves nowhere and the offer stays off.
+              */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <TextField
+                  label="First-order discount (%)"
+                  name="firstOrderDiscountPercent"
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={String(settings.firstOrderDiscountPercent)}
+                  error={state.fieldErrors?.firstOrderDiscountPercent}
+                  hint="Off a customer's first order, once per person. Zero turns it off."
                   required
                 />
               </div>
@@ -176,6 +206,50 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
                   hint="Shown as a range, e.g. “3–5 business days”."
                   required
                 />
+              </div>
+
+              {/*
+                Off by default, and deliberately not a one-click toggle: the
+                three fields beside it are what make COD survivable. Delhivery
+                charges the greater of a flat fee or a percentage of the amount
+                collected, and a refused parcel costs freight both ways with no
+                revenue — so the fee recovers the cost and the ceiling bounds the
+                loss on a refusal.
+              */}
+              <div className="flex flex-col gap-5 border-t border-line pt-5">
+                <Checkbox
+                  label="Offer cash on delivery"
+                  name="codEnabled"
+                  defaultChecked={settings.codEnabled}
+                  hint="Also checked per pincode against Delhivery — a pincode that does not accept COD will refuse it even with this on."
+                />
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <TextField
+                    label={`COD fee (${settings.currency})`}
+                    name="codFee"
+                    inputMode="decimal"
+                    defaultValue={major(settings.codFee)}
+                    error={state.fieldErrors?.codFee}
+                    hint="Added to a COD order. Zero absorbs the courier's charge."
+                  />
+                  <TextField
+                    label={`COD minimum (${settings.currency})`}
+                    name="codMinOrder"
+                    inputMode="decimal"
+                    defaultValue={major(settings.codMinOrder)}
+                    error={state.fieldErrors?.codMinOrder}
+                    hint="Zero for no minimum."
+                  />
+                  <TextField
+                    label={`COD maximum (${settings.currency})`}
+                    name="codMaxOrder"
+                    inputMode="decimal"
+                    defaultValue={major(settings.codMaxOrder)}
+                    error={state.fieldErrors?.codMaxOrder}
+                    hint="Zero for no limit. Caps what a refusal can cost you."
+                  />
+                </div>
               </div>
 
               <TextField
@@ -263,8 +337,12 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
           </Panel>
         </div>
 
-        <div>
-          <SubmitButton size="lg">Save settings</SubmitButton>
+        <div className="sticky bottom-3 z-30 flex items-center justify-between gap-4 rounded-2xl border border-line bg-surface/95 p-3 shadow-lg backdrop-blur-xl sm:px-4">
+          <div className="hidden sm:block">
+            <p className="text-sm font-semibold text-content">Store settings</p>
+            <p className="text-xs text-content-muted">Changes apply on the next page load.</p>
+          </div>
+          <SubmitButton size="lg" className="w-full sm:w-auto">Save settings</SubmitButton>
         </div>
       </form>
 
