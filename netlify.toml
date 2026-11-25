@@ -1,0 +1,13 @@
+# Netlify build settings. Framework detection, build command and publish directory
+# are handled by the Netlify UI and the Next.js runtime plugin; only the secrets
+# scan exception lives here.
+
+[build.environment]
+  # Netlify's secrets scan fails the build when an environment variable's value
+  # appears anywhere in the repo or build output. These four are not secrets: they
+  # hold short, public words ("sandbox", "staging", the bucket name, the brand name)
+  # that legitimately appear in source code, docs and rendered pages.
+  #
+  # Do NOT add real credentials (API keys, tokens, *_SECRET, service-role key) here.
+  # Leaving those scanned is what catches an accidental commit of them.
+  SECRETS_SCAN_OMIT_KEYS = "CASHFREE_ENVIRONMENT,DELHIVERY_ENVIRONMENT,SUPABASE_STORAGE_BUCKET,DELHIVERY_CLIENT_NAME"
